@@ -133,6 +133,13 @@ public class ExerciseService {
         return exerciseMapper.toResponse(exercise);
     }
 
+    @Transactional
+    public void deleteTiam(Long id) {
+        Exercise exercise = exerciseRepository.findByIdAndActivoTrue(id)
+            .orElseThrow(() -> new ResourceNotFoundException("Exercise not found: " + id));
+        exercise.setActivo(false); // soft delete — dirty-checking persists
+    }
+
     private Set<CognitiveArea> resolveAreas(List<Long> ids) {
         Set<CognitiveArea> areas = new HashSet<>();
         for (Long areaId : ids) {

@@ -65,4 +65,10 @@ public class AdminExerciseController {
             @PathVariable Long id, @Valid @RequestBody AdminExerciseRequest request) {
         return ResponseEntity.ok(ApiResponse.ok(exerciseService.updateTiam(id, request)));
     }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> delete(@PathVariable Long id) {
+        exerciseService.deleteTiam(id);
+        return ResponseEntity.noContent().build();
+    }
 }
