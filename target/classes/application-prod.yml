@@ -1,0 +1,26 @@
+# Production profile — all secrets come from Render environment variables:
+# DB_URL        → Supabase connection pooler URL (jdbc:postgresql://HOST:6543/postgres for transaction mode)
+# DB_USERNAME   → Supabase DB user (usually "postgres")
+# DB_PASSWORD   → Supabase DB password
+# JWT_SECRET    → minimum 256-bit random string
+# SPRING_PROFILES_ACTIVE → prod
+# PORT          → injected by Render automatically
+
+spring:
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+  jpa:
+    show-sql: false
+  flyway:
+    enabled: true
+
+tiam:
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS}
+
+logging:
+  level:
+    root: WARN
+    com.tiam: INFO
