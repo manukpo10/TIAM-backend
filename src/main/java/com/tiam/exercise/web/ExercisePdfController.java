@@ -72,7 +72,8 @@ public class ExercisePdfController {
     @PostMapping(value = "/pdf", produces = MediaType.APPLICATION_PDF_VALUE)
     public ResponseEntity<byte[]> downloadCombinedFichas(
             @Valid @RequestBody CombinedFichaRequest request) {
-        byte[] pdf = fichaPdfService.generateCombinedFicha(request.exerciseIds());
+        byte[] pdf = fichaPdfService.generateCombinedFicha(
+            request.exerciseIds(), request.patientId(), request.sessionTitle());
         return ResponseEntity.ok()
             .headers(buildPdfHeaders("sesion-fichas.pdf"))
             .contentType(MediaType.APPLICATION_PDF)
@@ -94,10 +95,14 @@ public class ExercisePdfController {
     /**
      * Request body for the combined PDF endpoint.
      *
-     * @param exerciseIds ordered list of exercise IDs to include in the PDF
+     * @param exerciseIds  ordered list of exercise IDs to include in the PDF
+     * @param patientId    optional patient ID — when present, the patient's data is rendered on each ficha
+     * @param sessionTitle optional session title shown in the info strip
      */
     public record CombinedFichaRequest(
         @NotEmpty(message = "At least one exercise ID is required")
-        List<Long> exerciseIds
+        List<Long> exerciseIds,
+        Long patientId,
+        String sessionTitle
     ) {}
 }

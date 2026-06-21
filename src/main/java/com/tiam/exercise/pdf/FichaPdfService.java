@@ -8,13 +8,22 @@ import com.tiam.exercise.domain.Exercise;
 import com.tiam.exercise.domain.ExerciseStatus;
 import com.tiam.exercise.domain.MaterialType;
 import com.tiam.exercise.repository.ExerciseRepository;
+import com.tiam.patient.domain.Patient;
+import com.tiam.patient.service.PatientService;
 import com.tiam.security.SecurityUtils;
+import com.tiam.user.domain.User;
+import com.tiam.user.service.UserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.awt.Color;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.time.LocalDate;
+import java.time.Period;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -24,6 +33,11 @@ import java.util.List;
  * <p>Returns raw {@code byte[]} (PDF) — callers are responsible for setting HTTP headers.
  * These methods are intentionally NOT wrapped in {@code ApiResponse} because the output
  * is a binary file download, not a JSON envelope response.
+ *
+ * <p>Each ficha carries a branded header (logo + wordmark) and an info strip with the
+ * professional's data, the date, and — when a patient is provided — the patient's name,
+ * age and diagnosis. The strip repeats on every page so individual sheets stay identifiable
+ * once printed and handed out.
  */
 @Service
 @RequiredArgsConstructor
@@ -35,11 +49,32 @@ public class FichaPdfService {
     private static final Color TEXT_DARK = new Color(0x1A, 0x1A, 0x2E);
     private static final Color TEXT_MUTED = new Color(0x6B, 0x7A, 0x99);
 
+    private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("dd/MM/yyyy");
+
+    /** Brand logo, loaded once from the classpath. Null if the asset is missing. */
+    private static final byte[] LOGO_BYTES = loadLogo();
+
     private final ExerciseRepository exerciseRepository;
+    private final UserService userService;
+    private final PatientService patientService;
 
     /**
-     * Generates a single-page A4 ficha for the given exercise.
-     * Applies visibility rules: exercise must be PUBLISHED + either TIAM-owned or owned by current user.
+     * Header data rendered on every ficha. Patient fields are null when no patient context
+     * is supplied (e.g. a single ficha downloaded straight from the library).
+     */
+    private record FichaHeader(
+        String professionalName,
+        String professionalSpecialty,
+        String patientName,
+        Integer patientAge,
+        String patientDiagnosis,
+        String sessionTitle,
+        String dateLabel
+    ) {}
+
+    /**
+     * Generates a single-page A4 ficha for the given exercise, with the current
+     * professional's data and today's date (no patient context).
      *
      * @throws ResourceNotFoundException if the exercise is not found or not visible to the current user
      */
@@ -47,12 +82,13 @@ public class FichaPdfService {
     public byte[] generateSingleFicha(Long exerciseId) {
         Long userId = SecurityUtils.currentUserId();
         Exercise exercise = findVisibleExercise(exerciseId, userId);
+        FichaHeader header = buildHeader(userId, null, null);
 
         try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
             Document doc = new Document(PageSize.A4, 36, 36, 36, 36);
             PdfWriter.getInstance(doc, baos);
             doc.open();
-            addFichaPage(doc, exercise);
+            addFichaPage(doc, exercise, header);
             doc.close();
             return baos.toByteArray();
         } catch (Exception e) {
@@ -62,14 +98,17 @@ public class FichaPdfService {
 
     /**
      * Generates a combined A4 PDF with one ficha per exercise, in the given order.
-     * Each exercise undergoes the same visibility check as the single-ficha endpoint.
-     * Exercises not visible to the current user are silently skipped.
+     * Each exercise undergoes the same visibility check as the single-ficha endpoint;
+     * exercises not visible to the current user are silently skipped.
      *
-     * @throws PdfGenerationException   if PDF rendering fails
-     * @throws ResourceNotFoundException if no visible exercises are found for the given IDs
+     * @param exerciseIds  ordered list of exercise IDs
+     * @param patientId    optional — when present, the patient's data is rendered (ownership enforced)
+     * @param sessionTitle optional — session title shown in the info strip
+     * @throws PdfGenerationException    if PDF rendering fails
+     * @throws ResourceNotFoundException if no visible exercises are found, or the patient is not owned by the user
      */
     @Transactional(readOnly = true)
-    public byte[] generateCombinedFicha(List<Long> exerciseIds) {
+    public byte[] generateCombinedFicha(List<Long> exerciseIds, Long patientId, String sessionTitle) {
         Long userId = SecurityUtils.currentUserId();
 
         // Fetch all in one query (EntityGraph loads cognitiveAreas eagerly)
@@ -88,13 +127,15 @@ public class FichaPdfService {
             throw new ResourceNotFoundException("No visible exercises found for the provided IDs");
         }
 
+        FichaHeader header = buildHeader(userId, patientId, sessionTitle);
+
         try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
             Document doc = new Document(PageSize.A4, 36, 36, 36, 36);
             PdfWriter.getInstance(doc, baos);
             doc.open();
 
             for (int i = 0; i < visible.size(); i++) {
-                addFichaPage(doc, visible.get(i));
+                addFichaPage(doc, visible.get(i), header);
                 if (i < visible.size() - 1) {
                     doc.newPage();
                 }
@@ -105,6 +146,43 @@ public class FichaPdfService {
         } catch (Exception e) {
             throw new PdfGenerationException("Failed to generate combined PDF", e);
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Header assembly
+    // -------------------------------------------------------------------------
+
+    /**
+     * Builds the header context. The professional is the current user; the patient (if any)
+     * is fetched through {@link PatientService#findEntityById} which enforces ownership.
+     */
+    private FichaHeader buildHeader(Long userId, Long patientId, String sessionTitle) {
+        User professional = userService.findEntityById(userId);
+
+        String patientName = null;
+        Integer patientAge = null;
+        String patientDiagnosis = null;
+        if (patientId != null) {
+            Patient patient = patientService.findEntityById(patientId, userId);
+            patientName = patient.getFullName();
+            patientAge = ageFrom(patient.getBirthDate());
+            patientDiagnosis = blankToNull(patient.getDiagnosis());
+        }
+
+        return new FichaHeader(
+            professional.getFullName(),
+            blankToNull(professional.getSpecialty()),
+            patientName,
+            patientAge,
+            patientDiagnosis,
+            blankToNull(sessionTitle),
+            LocalDate.now().format(DATE_FMT)
+        );
+    }
+
+    private Integer ageFrom(LocalDate birthDate) {
+        if (birthDate == null) return null;
+        return Period.between(birthDate, LocalDate.now()).getYears();
     }
 
     // -------------------------------------------------------------------------
@@ -130,58 +208,34 @@ public class FichaPdfService {
     // PDF layout — one A4 ficha
     // -------------------------------------------------------------------------
 
-    private void addFichaPage(Document doc, Exercise exercise) throws DocumentException {
-        // --- Header band ---
-        PdfPTable headerTable = new PdfPTable(1);
-        headerTable.setWidthPercentage(100);
+    private void addFichaPage(Document doc, Exercise exercise, FichaHeader header) throws DocumentException {
+        // --- Branded header: logo + wordmark + blue rule ---
+        doc.add(buildBrandHeader());
 
-        PdfPCell headerCell = new PdfPCell();
-        headerCell.setBackgroundColor(TIAM_BLUE);
-        headerCell.setBorder(Rectangle.NO_BORDER);
-        headerCell.setPadding(14);
-
-        Font wordmarkFont = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 18, Font.BOLD, Color.WHITE);
-        Font subtitleFont = FontFactory.getFont(FontFactory.HELVETICA, 9, Font.NORMAL, new Color(0xC5, 0xD8, 0xF5));
-
-        Paragraph wordmark = new Paragraph("TIAM Digital", wordmarkFont);
-        wordmark.setSpacingAfter(2);
-        Paragraph subtitle = new Paragraph("Estimulación cognitiva", subtitleFont);
-
-        headerCell.addElement(wordmark);
-        headerCell.addElement(subtitle);
-        headerTable.addCell(headerCell);
-        doc.add(headerTable);
+        // --- Info strip: patient / professional / date / session ---
+        doc.add(buildInfoStrip(header));
 
         doc.add(new Paragraph(" "));
 
         // --- Exercise title ---
-        Font titleFont = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 20, Font.BOLD, TEXT_DARK);
+        Font titleFont = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 19, Font.BOLD, TEXT_DARK);
         Paragraph title = new Paragraph(exercise.getTitle(), titleFont);
-        title.setSpacingAfter(10);
+        title.setSpacingAfter(8);
         doc.add(title);
 
         // --- Badges row: difficulty + material type + cognitive areas ---
-        PdfPTable badgeTable = new PdfPTable(1);
-        badgeTable.setWidthPercentage(100);
-        PdfPCell badgeCell = new PdfPCell();
-        badgeCell.setBorder(Rectangle.NO_BORDER);
-        badgeCell.setPaddingBottom(10);
-
         Phrase badges = new Phrase();
         Font badgeFont = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 8, Font.BOLD, Color.WHITE);
-
         badges.add(buildBadgeChunk(difficultyLabel(exercise.getDifficulty()), TIAM_BLUE, badgeFont));
         badges.add(new Chunk("  "));
         badges.add(buildBadgeChunk(materialLabel(exercise.getMaterialType()), new Color(0x5C, 0x8A, 0xBE), badgeFont));
-
         for (var area : exercise.getCognitiveAreas()) {
             badges.add(new Chunk("  "));
             badges.add(buildBadgeChunk(area.getName(), new Color(0x2E, 0x86, 0x6E), badgeFont));
         }
-
-        badgeCell.addElement(new Paragraph(badges));
-        badgeTable.addCell(badgeCell);
-        doc.add(badgeTable);
+        Paragraph badgeParagraph = new Paragraph(badges);
+        badgeParagraph.setSpacingAfter(10);
+        doc.add(badgeParagraph);
 
         // --- Horizontal separator ---
         doc.add(buildSeparator());
@@ -190,14 +244,12 @@ public class FichaPdfService {
         doc.add(buildSectionHeader("Descripción"));
         Font bodyFont = FontFactory.getFont(FontFactory.HELVETICA, 10, Font.NORMAL, TEXT_DARK);
         Paragraph descParagraph = new Paragraph(exercise.getDescription(), bodyFont);
-        descParagraph.setSpacingAfter(14);
+        descParagraph.setSpacingAfter(12);
         descParagraph.setLeading(14);
         doc.add(descParagraph);
 
         // --- Instrucciones section ---
         doc.add(buildSectionHeader("Instrucciones para el profesional"));
-
-        // Preserve line breaks from the instructions text
         String[] instructionLines = exercise.getInstructions().split("\\r?\\n", -1);
         for (String line : instructionLines) {
             Paragraph lineParagraph = new Paragraph(line.isBlank() ? " " : line, bodyFont);
@@ -210,6 +262,10 @@ public class FichaPdfService {
         // --- Área de trabajo (blank worksheet space) ---
         doc.add(buildAreaDeTrabajo());
 
+        // --- Professional foot: observations + signature lines ---
+        doc.add(buildWriteLine("Observaciones / próxima sesión"));
+        doc.add(buildWriteLine("Firma y sello del profesional"));
+
         // --- Footer ---
         doc.add(buildFooter(exercise.getTitle()));
     }
@@ -218,6 +274,103 @@ public class FichaPdfService {
     // Layout helpers
     // -------------------------------------------------------------------------
 
+    private PdfPTable buildBrandHeader() throws DocumentException {
+        PdfPTable container = new PdfPTable(1);
+        container.setWidthPercentage(100);
+
+        // Brand lockup: the logo image already carries the wordmark + tagline.
+        PdfPCell brandCell = new PdfPCell();
+        brandCell.setBorder(Rectangle.NO_BORDER);
+        brandCell.setPaddingBottom(6);
+
+        boolean logoRendered = false;
+        if (LOGO_BYTES != null) {
+            try {
+                Image logo = Image.getInstance(LOGO_BYTES);
+                logo.scaleToFit(150, 62);
+                logo.setAlignment(Image.LEFT);
+                brandCell.addElement(logo);
+                logoRendered = true;
+            } catch (IOException e) {
+                // fall through to the text wordmark fallback
+            }
+        }
+        if (!logoRendered) {
+            Font wordmarkFont = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 17, Font.BOLD, TIAM_BLUE);
+            Font subtitleFont = FontFactory.getFont(FontFactory.HELVETICA, 8.5f, Font.NORMAL, TEXT_MUTED);
+            Paragraph wordmark = new Paragraph("TIAM", wordmarkFont);
+            wordmark.setSpacingAfter(1);
+            brandCell.addElement(wordmark);
+            brandCell.addElement(new Paragraph("Taller interactivo · adultos mayores", subtitleFont));
+        }
+        container.addCell(brandCell);
+
+        // Blue underline rule
+        PdfPCell rule = new PdfPCell();
+        rule.setFixedHeight(2);
+        rule.setBackgroundColor(TIAM_BLUE);
+        rule.setBorder(Rectangle.NO_BORDER);
+        container.addCell(rule);
+
+        return container;
+    }
+
+    private PdfPTable buildInfoStrip(FichaHeader header) throws DocumentException {
+        PdfPTable strip = new PdfPTable(1);
+        strip.setWidthPercentage(100);
+        strip.setSpacingBefore(8);
+
+        PdfPCell cell = new PdfPCell();
+        cell.setBackgroundColor(LIGHT_GRAY);
+        cell.setBorderColor(BORDER_GRAY);
+        cell.setBorderWidth(0.8f);
+        cell.setPadding(9);
+
+        Font label = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 8.5f, Font.BOLD, TEXT_MUTED);
+        Font value = FontFactory.getFont(FontFactory.HELVETICA, 9.5f, Font.NORMAL, TEXT_DARK);
+        Font diag = FontFactory.getFont(FontFactory.HELVETICA, 9f, Font.ITALIC, TEXT_MUTED);
+
+        // Patient line (only when a patient is supplied)
+        if (header.patientName() != null) {
+            Phrase p = new Phrase();
+            p.add(new Chunk("Paciente:  ", label));
+            String who = header.patientName();
+            if (header.patientAge() != null) who += "  ·  " + header.patientAge() + " años";
+            p.add(new Chunk(who, value));
+            if (header.patientDiagnosis() != null) {
+                p.add(new Chunk("      " + header.patientDiagnosis(), diag));
+            }
+            Paragraph pp = new Paragraph(p);
+            pp.setLeading(15);
+            cell.addElement(pp);
+        }
+
+        // Professional line
+        Phrase pr = new Phrase();
+        pr.add(new Chunk("Profesional:  ", label));
+        String prof = header.professionalName();
+        if (header.professionalSpecialty() != null) prof += "  ·  " + header.professionalSpecialty();
+        pr.add(new Chunk(prof, value));
+        Paragraph prp = new Paragraph(pr);
+        prp.setLeading(15);
+        cell.addElement(prp);
+
+        // Date (+ session) line
+        Phrase d = new Phrase();
+        d.add(new Chunk("Fecha:  ", label));
+        d.add(new Chunk(header.dateLabel(), value));
+        if (header.sessionTitle() != null) {
+            d.add(new Chunk("        Sesión:  ", label));
+            d.add(new Chunk(header.sessionTitle(), value));
+        }
+        Paragraph dp = new Paragraph(d);
+        dp.setLeading(15);
+        cell.addElement(dp);
+
+        strip.addCell(cell);
+        return strip;
+    }
+
     private Chunk buildBadgeChunk(String text, Color bg, Font font) {
         Chunk chunk = new Chunk(" " + text + " ", font);
         chunk.setBackground(bg, 4, 3, 4, 3);
@@ -225,7 +378,7 @@ public class FichaPdfService {
         return chunk;
     }
 
-    private Paragraph buildSectionHeader(String text) throws DocumentException {
+    private Paragraph buildSectionHeader(String text) {
         Font sectionFont = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 11, Font.BOLD, TIAM_BLUE);
         Paragraph header = new Paragraph(text, sectionFont);
         header.setSpacingBefore(6);
@@ -233,7 +386,7 @@ public class FichaPdfService {
         return header;
     }
 
-    private PdfPTable buildSeparator() throws DocumentException {
+    private PdfPTable buildSeparator() {
         PdfPTable sep = new PdfPTable(1);
         sep.setWidthPercentage(100);
         sep.setSpacingBefore(4);
@@ -246,21 +399,19 @@ public class FichaPdfService {
         return sep;
     }
 
-    private PdfPTable buildAreaDeTrabajo() throws DocumentException {
-        // Section header
+    private PdfPTable buildAreaDeTrabajo() {
         Font sectionFont = FontFactory.getFont(FontFactory.HELVETICA_BOLD, 11, Font.BOLD, TIAM_BLUE);
         Paragraph areaHeader = new Paragraph("Área de trabajo", sectionFont);
         areaHeader.setSpacingBefore(6);
         areaHeader.setSpacingAfter(6);
 
-        // Bordered box for patient work space
         PdfPTable workTable = new PdfPTable(1);
         workTable.setWidthPercentage(100);
         workTable.setSpacingBefore(4);
-        workTable.setSpacingAfter(10);
+        workTable.setSpacingAfter(8);
 
         PdfPCell workCell = new PdfPCell();
-        workCell.setFixedHeight(180);
+        workCell.setFixedHeight(160);
         workCell.setBackgroundColor(LIGHT_GRAY);
         workCell.setBorderColor(BORDER_GRAY);
         workCell.setBorderWidth(1.2f);
@@ -270,7 +421,6 @@ public class FichaPdfService {
         workCell.addElement(new Paragraph("Espacio para que el paciente complete la actividad", hintFont));
         workTable.addCell(workCell);
 
-        // Combine into a containing table so we can add the header above
         PdfPTable container = new PdfPTable(1);
         container.setWidthPercentage(100);
 
@@ -288,12 +438,30 @@ public class FichaPdfService {
         return container;
     }
 
+    /** A labelled blank line for the professional to fill in by hand (observations, signature). */
+    private PdfPTable buildWriteLine(String label) {
+        PdfPTable t = new PdfPTable(1);
+        t.setWidthPercentage(100);
+        t.setSpacingBefore(10);
+
+        PdfPCell c = new PdfPCell();
+        c.setBorder(Rectangle.BOTTOM);
+        c.setBorderColor(BORDER_GRAY);
+        c.setBorderWidthBottom(0.8f);
+        c.setFixedHeight(24);
+        c.setVerticalAlignment(Element.ALIGN_TOP);
+        Font labelFont = FontFactory.getFont(FontFactory.HELVETICA, 8, Font.ITALIC, TEXT_MUTED);
+        c.addElement(new Paragraph(label, labelFont));
+        t.addCell(c);
+        return t;
+    }
+
     private Paragraph buildFooter(String exerciseTitle) {
         Font footerFont = FontFactory.getFont(FontFactory.HELVETICA, 7, Font.NORMAL, TEXT_MUTED);
         String footerText = "TIAM Digital — " + exerciseTitle + "   |   Ficha de estimulación cognitiva";
         Paragraph footer = new Paragraph(footerText, footerFont);
         footer.setAlignment(Element.ALIGN_CENTER);
-        footer.setSpacingBefore(6);
+        footer.setSpacingBefore(10);
         return footer;
     }
 
@@ -316,5 +484,17 @@ public class FichaPdfService {
             case VERBAL          -> "Verbal";
             case IMAGE_SEQUENCE  -> "Secuencia de imágenes";
         };
+    }
+
+    private static String blankToNull(String s) {
+        return (s == null || s.isBlank()) ? null : s;
+    }
+
+    private static byte[] loadLogo() {
+        try (InputStream is = FichaPdfService.class.getResourceAsStream("/tiam-logo.png")) {
+            return is != null ? is.readAllBytes() : null;
+        } catch (IOException e) {
+            return null;
+        }
     }
 }
