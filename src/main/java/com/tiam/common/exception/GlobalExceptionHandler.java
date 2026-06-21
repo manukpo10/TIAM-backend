@@ -7,6 +7,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -48,6 +49,18 @@ public class GlobalExceptionHandler {
         return ResponseEntity.internalServerError()
                 .body(ApiError.of(500, "PDF Generation Error",
                         "Failed to generate PDF", req.getRequestURI()));
+    }
+
+    /**
+     * Access denied from method security (@PreAuthorize). Without this, the catch-all
+     * {@code Exception} handler below would swallow it and return 500 instead of 403.
+     */
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ApiError> handleAccessDenied(AccessDeniedException ex,
+            HttpServletRequest req) {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(ApiError.of(403, "Forbidden",
+                        "No tenés permiso para realizar esta acción.", req.getRequestURI()));
     }
 
     @ExceptionHandler(Exception.class)
