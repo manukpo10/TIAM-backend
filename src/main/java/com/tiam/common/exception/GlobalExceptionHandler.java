@@ -1,14 +1,17 @@
 package com.tiam.common.exception;
 
 import com.tiam.common.web.ApiError;
+import com.tiam.exercise.pdf.PdfGenerationException;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+@Slf4j
 @RestControllerAdvice
 @RequiredArgsConstructor
 public class GlobalExceptionHandler {
@@ -38,8 +41,18 @@ public class GlobalExceptionHandler {
                         req.getRequestURI(), details));
     }
 
+    @ExceptionHandler(PdfGenerationException.class)
+    public ResponseEntity<ApiError> handlePdfGeneration(PdfGenerationException ex,
+            HttpServletRequest req) {
+        log.error("PDF generation failed on {} {}", req.getMethod(), req.getRequestURI(), ex);
+        return ResponseEntity.internalServerError()
+                .body(ApiError.of(500, "PDF Generation Error",
+                        "Failed to generate PDF", req.getRequestURI()));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiError> handleGeneric(Exception ex, HttpServletRequest req) {
+        log.error("Unhandled exception on {} {}", req.getMethod(), req.getRequestURI(), ex);
         return ResponseEntity.internalServerError()
                 .body(ApiError.of(500, "Internal Server Error",
                         "An unexpected error occurred", req.getRequestURI()));

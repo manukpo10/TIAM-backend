@@ -22,3 +22,15 @@ services:
         sync: false
       - key: JWT_EXPIRATION_MS
         value: 86400000
+      - key: MP_ACCESS_TOKEN
+        sync: false
+      - key: MP_WEBHOOK_SECRET
+        sync: false
+      - key: MP_BACK_URL_SUCCESS
+        sync: false
+      - key: MP_BACK_URL_FAILURE
+        sync: false
+      - key: MP_BACK_URL_PENDING
+        sync: false
+      - key: MP_NOTIFICATION_URL
+        sync: false
