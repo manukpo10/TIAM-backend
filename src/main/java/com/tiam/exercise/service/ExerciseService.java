@@ -54,7 +54,7 @@ public class ExerciseService {
             }
         }
         if (areaSlugs != null && !areaSlugs.isEmpty()) {
-            spec = spec.and(ExerciseSpecifications.hasAreaSlugIn(areaSlugs));
+            spec = spec.and(ExerciseSpecifications.hasAllAreaSlugs(areaSlugs));
         }
 
         Page<Exercise> page = exerciseRepository.findAll(spec, pageable);
@@ -99,7 +99,7 @@ public class ExerciseService {
             spec = spec.and(ExerciseSpecifications.hasDifficulty(difficulty));
         }
         if (areaSlugs != null && !areaSlugs.isEmpty()) {
-            spec = spec.and(ExerciseSpecifications.hasAreaSlugIn(areaSlugs));
+            spec = spec.and(ExerciseSpecifications.hasAllAreaSlugs(areaSlugs));
         }
 
         Page<Exercise> page = exerciseRepository.findAll(spec, pageable);

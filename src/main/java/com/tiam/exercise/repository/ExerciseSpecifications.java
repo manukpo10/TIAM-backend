@@ -3,7 +3,10 @@ package com.tiam.exercise.repository;
 import com.tiam.exercise.domain.DifficultyLevel;
 import com.tiam.exercise.domain.Exercise;
 import com.tiam.exercise.domain.ExerciseStatus;
-import jakarta.persistence.criteria.JoinType;
+import jakarta.persistence.criteria.Join;
+import jakarta.persistence.criteria.Predicate;
+import jakarta.persistence.criteria.Root;
+import jakarta.persistence.criteria.Subquery;
 import org.springframework.data.jpa.domain.Specification;
 
 import java.util.List;
@@ -60,14 +63,22 @@ public final class ExerciseSpecifications {
     }
 
     /**
-     * Exercises whose cognitiveAreas contain at least one of the given slugs.
-     * Uses DISTINCT to avoid duplicates from the join.
+     * AND semantics: exercises whose cognitiveAreas contain ALL of the given slugs.
+     * One correlated EXISTS subquery per slug (pagination-safe — no group by / distinct).
      */
-    public static Specification<Exercise> hasAreaSlugIn(List<String> slugs) {
+    public static Specification<Exercise> hasAllAreaSlugs(List<String> slugs) {
         return (root, query, cb) -> {
-            query.distinct(true);
-            var areas = root.join("cognitiveAreas", JoinType.INNER);
-            return areas.get("slug").in(slugs);
+            Predicate[] predicates = slugs.stream().map(slug -> {
+                Subquery<Long> sub = query.subquery(Long.class);
+                Root<Exercise> subRoot = sub.from(Exercise.class);
+                Join<Object, Object> subAreas = subRoot.join("cognitiveAreas");
+                sub.select(subRoot.get("id")).where(
+                    cb.equal(subRoot.get("id"), root.get("id")),
+                    cb.equal(subAreas.get("slug"), slug)
+                );
+                return cb.exists(sub);
+            }).toArray(Predicate[]::new);
+            return cb.and(predicates);
         };
     }
 }
