@@ -26,6 +26,10 @@ spring:
     default-property-inclusion: always
     serialization:
       write-dates-as-timestamps: false
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 5MB
 
 management:
   endpoints:
@@ -35,6 +39,11 @@ management:
   endpoint:
     health:
       show-details: when_authorized
+
+supabase:
+  url: ${SUPABASE_URL:}
+  service-key: ${SUPABASE_SERVICE_KEY:}
+  bucket: ${SUPABASE_BUCKET:exercise-images}
 
 tiam:
   jwt:

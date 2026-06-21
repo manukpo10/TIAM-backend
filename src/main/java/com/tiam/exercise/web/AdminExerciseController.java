@@ -1,5 +1,6 @@
 package com.tiam.exercise.web;
 
+import com.tiam.common.storage.SupabaseStorageService;
 import com.tiam.common.web.ApiResponse;
 import com.tiam.common.web.PagedResponse;
 import com.tiam.exercise.domain.DifficultyLevel;
@@ -9,11 +10,14 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/admin/exercises")
@@ -23,6 +27,15 @@ import java.util.List;
 public class AdminExerciseController {
 
     private final ExerciseService exerciseService;
+    private final SupabaseStorageService storageService;
+
+    /** Upload an exercise image; returns its public URL to store on the exercise. */
+    @PostMapping(value = "/image", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<ApiResponse<Map<String, String>>> uploadImage(
+            @RequestParam("file") MultipartFile file) {
+        String url = storageService.uploadImage(file);
+        return ResponseEntity.ok(ApiResponse.ok(Map.of("url", url)));
+    }
 
     @GetMapping
     public ResponseEntity<ApiResponse<PagedResponse<ExerciseResponse>>> findAll(

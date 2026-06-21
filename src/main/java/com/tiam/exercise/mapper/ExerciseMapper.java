@@ -32,7 +32,6 @@ public interface ExerciseMapper {
     @Mapping(target = "ownerId", ignore = true)
     @Mapping(target = "cognitiveAreas", ignore = true)
     @Mapping(target = "fileUrl", ignore = true)
-    @Mapping(target = "previewImageUrl", ignore = true)
     Exercise toEntity(AdminExerciseRequest request);
 
     @BeanMapping(nullValuePropertyMappingStrategy = NullValuePropertyMappingStrategy.IGNORE)
@@ -43,6 +42,5 @@ public interface ExerciseMapper {
     @Mapping(target = "ownerId", ignore = true)
     @Mapping(target = "cognitiveAreas", ignore = true)
     @Mapping(target = "fileUrl", ignore = true)
-    @Mapping(target = "previewImageUrl", ignore = true)
     void updateEntity(AdminExerciseRequest request, @MappingTarget Exercise exercise);
 }

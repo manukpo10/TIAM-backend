@@ -13,5 +13,6 @@ public record AdminExerciseRequest(
     @NotNull DifficultyLevel difficulty,
     @NotNull MaterialType materialType,
     @NotEmpty List<Long> cognitiveAreaIds,
-    ExerciseStatus status
+    ExerciseStatus status,
+    @Size(max = 500) String previewImageUrl
 ) {}

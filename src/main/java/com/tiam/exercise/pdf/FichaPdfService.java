@@ -21,6 +21,11 @@ import java.awt.Color;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.Period;
 import java.time.format.DateTimeFormatter;
@@ -53,6 +58,9 @@ public class FichaPdfService {
 
     /** Brand logo, loaded once from the classpath. Null if the asset is missing. */
     private static final byte[] LOGO_BYTES = loadLogo();
+
+    /** Client for fetching exercise images (from the public Supabase Storage bucket). */
+    private static final HttpClient IMAGE_HTTP = HttpClient.newHttpClient();
 
     private final ExerciseRepository exerciseRepository;
     private final UserService userService;
@@ -259,8 +267,15 @@ public class FichaPdfService {
 
         doc.add(new Paragraph(" "));
 
-        // --- Área de trabajo (blank worksheet space) ---
-        doc.add(buildAreaDeTrabajo());
+        // --- Exercise image (if any) or blank work area ---
+        byte[] imageBytes = hasText(exercise.getPreviewImageUrl())
+            ? fetchImage(exercise.getPreviewImageUrl())
+            : null;
+        if (imageBytes != null && addExerciseImage(doc, imageBytes)) {
+            doc.add(new Paragraph(" "));
+        } else {
+            doc.add(buildAreaDeTrabajo());
+        }
 
         // --- Professional foot: observations + signature lines ---
         doc.add(buildWriteLine("Observaciones / próxima sesión"));
@@ -488,6 +503,39 @@ public class FichaPdfService {
 
     private static String blankToNull(String s) {
         return (s == null || s.isBlank()) ? null : s;
+    }
+
+    private static boolean hasText(String s) {
+        return s != null && !s.isBlank();
+    }
+
+    /** Downloads the image bytes from a (public) URL; null on any failure. */
+    private byte[] fetchImage(String url) {
+        try {
+            HttpRequest request = HttpRequest.newBuilder(URI.create(url))
+                .timeout(Duration.ofSeconds(8))
+                .GET()
+                .build();
+            HttpResponse<byte[]> response = IMAGE_HTTP.send(request, HttpResponse.BodyHandlers.ofByteArray());
+            if (response.statusCode() == 200) return response.body();
+        } catch (Exception ignored) {
+            // Network/timeout failure → caller falls back to the blank work area.
+        }
+        return null;
+    }
+
+    /** Adds the exercise image to the ficha. Returns false (adding nothing) if it can't render. */
+    private boolean addExerciseImage(Document doc, byte[] bytes) {
+        try {
+            Image image = Image.getInstance(bytes);
+            image.scaleToFit(430, 250);
+            image.setAlignment(Image.MIDDLE);
+            doc.add(buildSectionHeader("Imagen del ejercicio"));
+            doc.add(image);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private static byte[] loadLogo() {
