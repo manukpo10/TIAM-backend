@@ -1,3 +1,8 @@
 
 # build output
 target/
+
+# local env / secrets — never commit (use .env.example as the template)
+.env
+.env.*
+!.env.example
