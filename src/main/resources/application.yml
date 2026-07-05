@@ -9,6 +9,13 @@ spring:
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
+    hikari:
+      # Supabase's session-mode pooler caps total clients at 15. Render deploys
+      # without downtime, so the old and new instances briefly run at once — two
+      # pools must fit within that cap. Keep this small (default is 10, which
+      # made 10+10=20 > 15 and broke every deploy with EMAXCONNSESSION).
+      maximum-pool-size: ${DB_POOL_SIZE:3}
+      minimum-idle: 1
   jpa:
     open-in-view: false
     hibernate:
