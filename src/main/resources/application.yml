@@ -61,3 +61,5 @@ tiam:
     back-url-failure: ${MP_BACK_URL_FAILURE:http://localhost:5173/subscription/failure}
     back-url-pending: ${MP_BACK_URL_PENDING:http://localhost:5173/subscription/pending}
     notification-url: ${MP_NOTIFICATION_URL:}
+  challenge:
+    back-url: ${CHALLENGE_BACK_URL:http://localhost:5173/desafio-30-dias}

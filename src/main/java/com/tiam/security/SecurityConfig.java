@@ -39,6 +39,7 @@ public class SecurityConfig {
                         .requestMatchers("/auth/**").permitAll()
                         .requestMatchers("/webhooks/**").permitAll()
                         .requestMatchers("/play/**").permitAll()
+                        .requestMatchers("/challenge/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/leads").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/info").permitAll()
                         .requestMatchers(

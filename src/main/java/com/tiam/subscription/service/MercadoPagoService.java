@@ -1,16 +1,26 @@
 package com.tiam.subscription.service;
 
 import com.mercadopago.MercadoPagoConfig;
+import com.mercadopago.client.payment.PaymentClient;
 import com.mercadopago.client.preapproval.PreApprovalAutoRecurringCreateRequest;
 import com.mercadopago.client.preapproval.PreapprovalClient;
 import com.mercadopago.client.preapproval.PreapprovalCreateRequest;
+import com.mercadopago.client.preference.PreferenceBackUrlsRequest;
+import com.mercadopago.client.preference.PreferenceClient;
+import com.mercadopago.client.preference.PreferenceItemRequest;
+import com.mercadopago.client.preference.PreferencePayerRequest;
+import com.mercadopago.client.preference.PreferenceRequest;
 import com.mercadopago.exceptions.MPApiException;
 import com.mercadopago.exceptions.MPException;
+import com.mercadopago.resources.payment.Payment;
 import com.mercadopago.resources.preapproval.Preapproval;
+import com.mercadopago.resources.preference.Preference;
+import com.tiam.subscription.config.ChallengeProperties;
 import com.tiam.subscription.config.MercadoPagoProperties;
 import com.tiam.subscription.config.PlansProperties;
 import com.tiam.subscription.domain.ProfessionalPlan;
 import java.math.BigDecimal;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -23,6 +33,7 @@ public class MercadoPagoService {
 
     private final MercadoPagoProperties mpProperties;
     private final PlansProperties plansProperties;
+    private final ChallengeProperties challengeProperties;
 
     /**
      * Initializes the MP SDK with the configured access token.
@@ -83,6 +94,59 @@ public class MercadoPagoService {
         initSdk();
         PreapprovalClient client = new PreapprovalClient();
         return client.get(preapprovalId);
+    }
+
+    /**
+     * Creates a one-time-payment checkout preference (Checkout Pro) for a single item.
+     *
+     * @param itemTitle         the item description shown at checkout
+     * @param amount            the amount to charge, in ARS
+     * @param payerEmail        the buyer's email, may be null/blank
+     * @param externalReference the local purchase id (for webhook correlation)
+     * @return the init_point URL to redirect the user to MP checkout
+     */
+    public String createPreference(String itemTitle, BigDecimal amount, String payerEmail,
+            String externalReference) throws MPException, MPApiException {
+        initSdk();
+
+        PreferenceItemRequest item = PreferenceItemRequest.builder()
+                .title(itemTitle)
+                .quantity(1)
+                .unitPrice(amount)
+                .currencyId("ARS")
+                .build();
+
+        PreferenceBackUrlsRequest backUrls = PreferenceBackUrlsRequest.builder()
+                .success(challengeProperties.getBackUrl())
+                .failure(challengeProperties.getBackUrl())
+                .pending(challengeProperties.getBackUrl())
+                .build();
+
+        PreferenceRequest.PreferenceRequestBuilder requestBuilder = PreferenceRequest.builder()
+                .items(List.of(item))
+                .backUrls(backUrls)
+                .externalReference(externalReference);
+
+        if (StringUtils.hasText(payerEmail)) {
+            requestBuilder.payer(PreferencePayerRequest.builder().email(payerEmail).build());
+        }
+
+        PreferenceClient client = new PreferenceClient();
+        Preference preference = client.create(requestBuilder.build());
+
+        log.info("Created MP preference id={} for externalReference={}",
+                preference.getId(), externalReference);
+
+        return preference.getInitPoint();
+    }
+
+    /**
+     * Fetches a payment by its MP id.
+     */
+    public Payment getPayment(String paymentId) throws MPException, MPApiException {
+        initSdk();
+        PaymentClient client = new PaymentClient();
+        return client.get(Long.parseLong(paymentId));
     }
 
     /**
