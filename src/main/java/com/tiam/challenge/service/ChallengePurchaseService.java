@@ -4,6 +4,7 @@ import com.mercadopago.exceptions.MPApiException;
 import com.mercadopago.exceptions.MPException;
 import com.tiam.challenge.domain.ChallengePurchase;
 import com.tiam.challenge.domain.ChallengePurchaseStatus;
+import com.tiam.challenge.dto.ChallengeAccessResponse;
 import com.tiam.challenge.dto.CreatePurchaseRequest;
 import com.tiam.challenge.dto.CreatePurchaseResponse;
 import com.tiam.challenge.repository.ChallengePurchaseRepository;
@@ -12,6 +13,9 @@ import com.tiam.common.exception.ResourceNotFoundException;
 import com.tiam.subscription.service.MercadoPagoService;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -25,6 +29,8 @@ public class ChallengePurchaseService {
 
     private static final BigDecimal PRICE_ARS = BigDecimal.valueOf(15000);
     private static final String ITEM_TITLE = "Desafío 30 días - TIAM Digital";
+    private static final ZoneId ZONE = ZoneId.of("America/Argentina/Buenos_Aires");
+    private static final int TOTAL_DAYS = 30;
 
     private final ChallengePurchaseRepository challengePurchaseRepository;
     private final MercadoPagoService mercadoPagoService;
@@ -58,6 +64,36 @@ public class ChallengePurchaseService {
                     purchase.getId(), e.getMessage(), e);
             throw new BadRequestException("Could not start checkout: " + e.getMessage());
         }
+    }
+
+    /**
+     * Resolves the buyer's current progress in the 30-day challenge from their
+     * access token. Only PAID purchases with a recorded purchase date grant
+     * access — anything else (unknown token, still PENDING, FAILED) is treated
+     * as not found so we don't leak purchase state to an unauthenticated caller.
+     */
+    @Transactional(readOnly = true)
+    public ChallengeAccessResponse getAccess(String accessToken) {
+        ChallengePurchase purchase = challengePurchaseRepository.findByAccessTokenAndActivoTrue(accessToken)
+                .orElseThrow(() -> new ResourceNotFoundException("Challenge access not found: " + accessToken));
+
+        if (purchase.getStatus() != ChallengePurchaseStatus.PAID || purchase.getPurchaseDate() == null) {
+            throw new ResourceNotFoundException("Challenge access not found: " + accessToken);
+        }
+
+        LocalDate purchaseDay = purchase.getPurchaseDate().atZone(ZONE).toLocalDate();
+        LocalDate today = LocalDate.now(ZONE);
+        long elapsed = ChronoUnit.DAYS.between(purchaseDay, today);
+        int currentDay = (int) Math.max(1, Math.min(TOTAL_DAYS, elapsed + 1));
+
+        return new ChallengeAccessResponse(firstName(purchase.getBuyerName()), currentDay, TOTAL_DAYS);
+    }
+
+    private String firstName(String buyerName) {
+        if (buyerName == null || buyerName.isBlank()) {
+            return buyerName == null ? "" : buyerName;
+        }
+        return buyerName.trim().split("\\s+")[0];
     }
 
     /**
