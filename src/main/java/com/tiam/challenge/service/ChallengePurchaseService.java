@@ -100,9 +100,11 @@ public class ChallengePurchaseService {
 
     private String firstName(String buyerName) {
         if (buyerName == null || buyerName.isBlank()) {
-            return buyerName == null ? "" : buyerName;
+            return "";
         }
-        return buyerName.trim().split("\\s+")[0];
+        String first = buyerName.trim().split("\\s+")[0];
+        // Capitalize so a name typed lowercase/uppercase still greets tidily ("maria" → "Maria").
+        return first.substring(0, 1).toUpperCase() + first.substring(1).toLowerCase();
     }
 
     /**
@@ -143,19 +145,18 @@ public class ChallengePurchaseService {
             String link = whatsAppProperties.getDesafioPlayBaseUrl() + "/" + purchase.getAccessToken();
 
             if (currentDay < TOTAL_DAYS) {
-                return "¡Hola " + firstName + "! 👋 Tu ejercicio de hoy (Día " + currentDay + " de " + TOTAL_DAYS
-                        + ") te espera acá: " + link
-                        + "\n\n📌 Mañana escribinos \"desafío\" de nuevo y te paso el Día " + (currentDay + 1) + ".";
+                return "¡Hola " + firstName + "! 👋 Acá está tu ejercicio del Día " + currentDay + " de " + TOTAL_DAYS + ":\n" + link
+                        + "\n\nTocá el link, hacelo con calma (son unos minutos) y listo por hoy. 🌱"
+                        + "\n\n📌 Mañana escribinos \"desafío\" y te paso el Día " + (currentDay + 1) + ".";
             }
 
-            return "¡Hola " + firstName + "! 👋 Este es tu último ejercicio (Día " + TOTAL_DAYS + " de " + TOTAL_DAYS
-                    + "): " + link
-                    + "\n\n🎉 ¡Completaste el Desafío 30 días! Gracias por acompañarnos.";
+            return "¡Hola " + firstName + "! 👋 Llegaste al Día " + TOTAL_DAYS + " de " + TOTAL_DAYS + ", tu último ejercicio:\n" + link
+                    + "\n\n🎉 ¡Completaste el Desafío 30 días! Fueron 30 días cuidando tu mente. Gracias por acompañarnos. 💙";
         }
 
         if (hasPendingPurchase(rawFromPhone)) {
-            return "¡Hola! 👋 Estamos confirmando tu pago. En cuanto se acredite, escribinos \"desafío\" de nuevo"
-                    + " y te mando tu primer ejercicio. 🙌";
+            return "¡Hola! 👋 Estamos confirmando tu pago — puede tardar unos minutos."
+                    + "\n\nEn cuanto se acredite, escribinos \"desafío\" de nuevo y te mando tu primer ejercicio. 🙌";
         }
 
         return "¡Hola! No encontramos ninguna compra activa asociada a este número. "

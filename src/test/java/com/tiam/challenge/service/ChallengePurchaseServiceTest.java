@@ -95,6 +95,15 @@ class ChallengePurchaseServiceTest {
     }
 
     @Test
+    void getAccess_lowercaseName_capitalizesFirstName() {
+        givenPurchase(purchase("maria garcia", ChallengePurchaseStatus.PAID, Instant.now()));
+
+        ChallengeAccessResponse response = service.getAccess(ACCESS_TOKEN);
+
+        assertThat(response.buyerFirstName()).isEqualTo("Maria");
+    }
+
+    @Test
     void getAccess_totalDaysIsAlways30() {
         givenPurchase(purchase("Manuel Robles", ChallengePurchaseStatus.PAID, Instant.now()));
 
