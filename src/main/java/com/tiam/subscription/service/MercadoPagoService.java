@@ -125,6 +125,9 @@ public class MercadoPagoService {
         PreferenceRequest.PreferenceRequestBuilder requestBuilder = PreferenceRequest.builder()
                 .items(List.of(item))
                 .backUrls(backUrls)
+                // Auto-redirect the buyer back to our success page once the payment is approved,
+                // instead of leaving them on Mercado Pago's confirmation screen.
+                .autoReturn("approved")
                 .externalReference(externalReference);
 
         if (StringUtils.hasText(payerEmail)) {
