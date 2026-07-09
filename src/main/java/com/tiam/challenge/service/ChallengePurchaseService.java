@@ -2,6 +2,7 @@ package com.tiam.challenge.service;
 
 import com.mercadopago.exceptions.MPApiException;
 import com.mercadopago.exceptions.MPException;
+import com.tiam.challenge.config.WhatsAppProperties;
 import com.tiam.challenge.domain.ChallengePurchase;
 import com.tiam.challenge.domain.ChallengePurchaseStatus;
 import com.tiam.challenge.dto.ChallengeAccessResponse;
@@ -10,12 +11,15 @@ import com.tiam.challenge.dto.CreatePurchaseResponse;
 import com.tiam.challenge.repository.ChallengePurchaseRepository;
 import com.tiam.common.exception.BadRequestException;
 import com.tiam.common.exception.ResourceNotFoundException;
+import com.tiam.common.util.PhoneNumberUtil;
 import com.tiam.subscription.service.MercadoPagoService;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
+import java.util.Comparator;
+import java.util.Optional;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -34,6 +38,7 @@ public class ChallengePurchaseService {
 
     private final ChallengePurchaseRepository challengePurchaseRepository;
     private final MercadoPagoService mercadoPagoService;
+    private final WhatsAppProperties whatsAppProperties;
 
     /**
      * Creates a pending purchase and a Mercado Pago checkout preference for it.
@@ -47,7 +52,7 @@ public class ChallengePurchaseService {
 
         ChallengePurchase purchase = new ChallengePurchase();
         purchase.setBuyerName(request.buyerName());
-        purchase.setPhone(request.phone());
+        purchase.setPhone(PhoneNumberUtil.normalize(request.phone()));
         purchase.setEmail(request.email());
         purchase.setStatus(ChallengePurchaseStatus.PENDING);
         purchase.setAccessToken(UUID.randomUUID().toString());
@@ -81,12 +86,16 @@ public class ChallengePurchaseService {
             throw new ResourceNotFoundException("Challenge access not found: " + accessToken);
         }
 
-        LocalDate purchaseDay = purchase.getPurchaseDate().atZone(ZONE).toLocalDate();
-        LocalDate today = LocalDate.now(ZONE);
-        long elapsed = ChronoUnit.DAYS.between(purchaseDay, today);
-        int currentDay = (int) Math.max(1, Math.min(TOTAL_DAYS, elapsed + 1));
+        int currentDay = computeCurrentDay(purchase.getPurchaseDate());
 
         return new ChallengeAccessResponse(firstName(purchase.getBuyerName()), currentDay, TOTAL_DAYS);
+    }
+
+    private int computeCurrentDay(Instant purchaseDate) {
+        LocalDate purchaseDay = purchaseDate.atZone(ZONE).toLocalDate();
+        LocalDate today = LocalDate.now(ZONE);
+        long elapsed = ChronoUnit.DAYS.between(purchaseDay, today);
+        return (int) Math.max(1, Math.min(TOTAL_DAYS, elapsed + 1));
     }
 
     private String firstName(String buyerName) {
@@ -94,6 +103,39 @@ public class ChallengePurchaseService {
             return buyerName == null ? "" : buyerName;
         }
         return buyerName.trim().split("\\s+")[0];
+    }
+
+    /**
+     * Finds the most recent active, PAID purchase for a phone number (already
+     * normalized or raw — this normalizes internally). Used by the WhatsApp
+     * webhook to correlate an inbound message with a purchase.
+     */
+    public Optional<ChallengePurchase> findActiveByPhone(String rawPhone) {
+        String normalized = PhoneNumberUtil.normalize(rawPhone);
+        if (normalized.isEmpty()) {
+            return Optional.empty();
+        }
+        return challengePurchaseRepository.findByPhoneAndActivoTrue(normalized).stream()
+                .filter(p -> p.getStatus() == ChallengePurchaseStatus.PAID && p.getPurchaseDate() != null)
+                .max(Comparator.comparing(ChallengePurchase::getPurchaseDate));
+    }
+
+    /**
+     * Builds the WhatsApp reply text for an inbound message from the given phone
+     * number: today's exercise link if there's a matching active purchase, or a
+     * sales-page nudge otherwise.
+     */
+    @Transactional(readOnly = true)
+    public String buildWhatsAppReply(String rawFromPhone) {
+        return findActiveByPhone(rawFromPhone)
+                .map(purchase -> {
+                    int currentDay = computeCurrentDay(purchase.getPurchaseDate());
+                    return "¡Hola " + firstName(purchase.getBuyerName()) + "! 👋 Tu ejercicio de hoy (Día "
+                            + currentDay + " de " + TOTAL_DAYS + ") te espera acá: "
+                            + whatsAppProperties.getDesafioPlayBaseUrl() + "/" + purchase.getAccessToken();
+                })
+                .orElseGet(() -> "¡Hola! No encontramos ninguna compra activa asociada a este número. "
+                        + "Conocé el Desafío 30 días de TIAM acá: " + whatsAppProperties.getSalesPageUrl());
     }
 
     /**

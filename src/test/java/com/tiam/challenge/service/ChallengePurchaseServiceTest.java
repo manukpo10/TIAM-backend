@@ -1,23 +1,31 @@
 package com.tiam.challenge.service;
 
+import com.mercadopago.exceptions.MPApiException;
+import com.mercadopago.exceptions.MPException;
+import com.tiam.challenge.config.WhatsAppProperties;
 import com.tiam.challenge.domain.ChallengePurchase;
 import com.tiam.challenge.domain.ChallengePurchaseStatus;
 import com.tiam.challenge.dto.ChallengeAccessResponse;
+import com.tiam.challenge.dto.CreatePurchaseRequest;
 import com.tiam.challenge.repository.ChallengePurchaseRepository;
 import com.tiam.common.exception.ResourceNotFoundException;
 import com.tiam.subscription.service.MercadoPagoService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -27,12 +35,13 @@ class ChallengePurchaseServiceTest {
 
     @Mock ChallengePurchaseRepository challengePurchaseRepository;
     @Mock MercadoPagoService mercadoPagoService;
+    @Mock WhatsAppProperties whatsAppProperties;
 
     ChallengePurchaseService service;
 
     @BeforeEach
     void setUp() {
-        service = new ChallengePurchaseService(challengePurchaseRepository, mercadoPagoService);
+        service = new ChallengePurchaseService(challengePurchaseRepository, mercadoPagoService, whatsAppProperties);
     }
 
     @Test
@@ -127,6 +136,97 @@ class ChallengePurchaseServiceTest {
 
         assertThatThrownBy(() -> service.getAccess(ACCESS_TOKEN))
             .isInstanceOf(ResourceNotFoundException.class);
+    }
+
+    @Test
+    void createPurchase_normalizesPhoneBeforeSaving() throws MPException, MPApiException {
+        when(mercadoPagoService.isConfigured()).thenReturn(true);
+        when(challengePurchaseRepository.save(any(ChallengePurchase.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(mercadoPagoService.createPreference(any(), any(), any(), any()))
+                .thenReturn("http://mock-init-point");
+
+        CreatePurchaseRequest request =
+                new CreatePurchaseRequest("Manuel Robles", "11 2233-4455", "buyer@example.com");
+
+        service.createPurchase(request);
+
+        ArgumentCaptor<ChallengePurchase> captor = ArgumentCaptor.forClass(ChallengePurchase.class);
+        verify(challengePurchaseRepository).save(captor.capture());
+        assertThat(captor.getValue().getPhone()).isEqualTo("541122334455");
+    }
+
+    @Test
+    void findActiveByPhone_singlePaidMatch_returnsIt() {
+        ChallengePurchase purchase = purchase("Manuel Robles", ChallengePurchaseStatus.PAID, Instant.now());
+        when(challengePurchaseRepository.findByPhoneAndActivoTrue("541122334455"))
+                .thenReturn(List.of(purchase));
+
+        Optional<ChallengePurchase> result = service.findActiveByPhone("541122334455");
+
+        assertThat(result).contains(purchase);
+    }
+
+    @Test
+    void findActiveByPhone_multiplePaidMatches_returnsMostRecentByPurchaseDate() {
+        ChallengePurchase older = purchase("Ana Diaz", ChallengePurchaseStatus.PAID,
+                Instant.now().minus(10, ChronoUnit.DAYS));
+        ChallengePurchase newer = purchase("Ana Diaz", ChallengePurchaseStatus.PAID,
+                Instant.now().minus(2, ChronoUnit.DAYS));
+        when(challengePurchaseRepository.findByPhoneAndActivoTrue("541122334455"))
+                .thenReturn(List.of(older, newer));
+
+        Optional<ChallengePurchase> result = service.findActiveByPhone("541122334455");
+
+        assertThat(result).contains(newer);
+    }
+
+    @Test
+    void findActiveByPhone_onlyPendingMatch_returnsEmpty() {
+        ChallengePurchase pending = purchase("Ana Diaz", ChallengePurchaseStatus.PENDING, null);
+        when(challengePurchaseRepository.findByPhoneAndActivoTrue("541122334455"))
+                .thenReturn(List.of(pending));
+
+        Optional<ChallengePurchase> result = service.findActiveByPhone("541122334455");
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    void findActiveByPhone_noMatch_returnsEmpty() {
+        when(challengePurchaseRepository.findByPhoneAndActivoTrue("541122334455"))
+                .thenReturn(List.of());
+
+        Optional<ChallengePurchase> result = service.findActiveByPhone("541122334455");
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    void buildWhatsAppReply_matchedPhone_includesFirstNameDayAndLink() {
+        ChallengePurchase purchase = purchase("Manuel Robles", ChallengePurchaseStatus.PAID,
+                Instant.now().minus(4, ChronoUnit.DAYS));
+        when(challengePurchaseRepository.findByPhoneAndActivoTrue("541122334455"))
+                .thenReturn(List.of(purchase));
+        when(whatsAppProperties.getDesafioPlayBaseUrl()).thenReturn("http://localhost:5173/desafio");
+
+        String reply = service.buildWhatsAppReply("541122334455");
+
+        assertThat(reply)
+                .contains("Manuel")
+                .contains("Día 5 de 30")
+                .contains("http://localhost:5173/desafio/test-access-token");
+    }
+
+    @Test
+    void buildWhatsAppReply_unmatchedPhone_includesSalesPageUrl() {
+        when(challengePurchaseRepository.findByPhoneAndActivoTrue("541122334455"))
+                .thenReturn(List.of());
+        when(whatsAppProperties.getSalesPageUrl()).thenReturn("http://localhost:5173/desafio-30-dias");
+
+        String reply = service.buildWhatsAppReply("541122334455");
+
+        assertThat(reply).contains("http://localhost:5173/desafio-30-dias");
     }
 
     // --- fixtures -------------------------------------------------------------
