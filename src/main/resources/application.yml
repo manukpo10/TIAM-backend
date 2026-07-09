@@ -69,7 +69,7 @@ tiam:
     back-url-pending: ${MP_BACK_URL_PENDING:http://localhost:5173/subscription/pending}
     notification-url: ${MP_NOTIFICATION_URL:}
   challenge:
-    back-url: ${CHALLENGE_BACK_URL:http://localhost:5173/desafio-30-dias}
+    back-url: ${CHALLENGE_BACK_URL:http://localhost:5173/desafio-30-dias/exito}
   whatsapp:
     access-token: ${WHATSAPP_ACCESS_TOKEN:}
     phone-number-id: ${WHATSAPP_PHONE_NUMBER_ID:}

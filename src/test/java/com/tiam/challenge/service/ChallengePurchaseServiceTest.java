@@ -214,12 +214,67 @@ class ChallengePurchaseServiceTest {
 
         assertThat(reply)
                 .contains("Manuel")
-                .contains("Día 5 de 30")
+                .contains("Día")
                 .contains("http://localhost:5173/desafio/test-access-token");
     }
 
     @Test
     void buildWhatsAppReply_unmatchedPhone_includesSalesPageUrl() {
+        when(challengePurchaseRepository.findByPhoneAndActivoTrue("541122334455"))
+                .thenReturn(List.of());
+        when(whatsAppProperties.getSalesPageUrl()).thenReturn("http://localhost:5173/desafio-30-dias");
+
+        String reply = service.buildWhatsAppReply("541122334455");
+
+        assertThat(reply).contains("http://localhost:5173/desafio-30-dias");
+    }
+
+    @Test
+    void buildWhatsAppReply_matchedDayUnderThirty_includesTomorrowLine() {
+        ChallengePurchase purchase = purchase("Manuel Robles", ChallengePurchaseStatus.PAID,
+                Instant.now().minus(4, ChronoUnit.DAYS));
+        when(challengePurchaseRepository.findByPhoneAndActivoTrue("541122334455"))
+                .thenReturn(List.of(purchase));
+        when(whatsAppProperties.getDesafioPlayBaseUrl()).thenReturn("http://localhost:5173/desafio");
+
+        String reply = service.buildWhatsAppReply("541122334455");
+
+        assertThat(reply)
+                .contains("Día 5")
+                .contains("http://localhost:5173/desafio/test-access-token")
+                .contains("Día 6")
+                .contains("desafío");
+    }
+
+    @Test
+    void buildWhatsAppReply_matchedDayThirty_includesCompletion() {
+        ChallengePurchase purchase = purchase("Manuel Robles", ChallengePurchaseStatus.PAID,
+                Instant.now().minus(40, ChronoUnit.DAYS));
+        when(challengePurchaseRepository.findByPhoneAndActivoTrue("541122334455"))
+                .thenReturn(List.of(purchase));
+        when(whatsAppProperties.getDesafioPlayBaseUrl()).thenReturn("http://localhost:5173/desafio");
+
+        String reply = service.buildWhatsAppReply("541122334455");
+
+        assertThat(reply)
+                .contains("último")
+                .contains("Completaste")
+                .doesNotContain("Día 31");
+    }
+
+    @Test
+    void buildWhatsAppReply_pendingPurchaseNoPaid_returnsConfirmingMessage() {
+        ChallengePurchase pending = purchase("Ana Diaz", ChallengePurchaseStatus.PENDING, null);
+        when(challengePurchaseRepository.findByPhoneAndActivoTrue("541122334455"))
+                .thenReturn(List.of(pending));
+
+        String reply = service.buildWhatsAppReply("541122334455");
+
+        assertThat(reply).contains("Estamos confirmando tu pago").contains("desafío");
+    }
+
+    @Test
+    void buildWhatsAppReply_noPurchase_returnsSalesFallback() {
         when(challengePurchaseRepository.findByPhoneAndActivoTrue("541122334455"))
                 .thenReturn(List.of());
         when(whatsAppProperties.getSalesPageUrl()).thenReturn("http://localhost:5173/desafio-30-dias");

@@ -122,20 +122,58 @@ public class ChallengePurchaseService {
 
     /**
      * Builds the WhatsApp reply text for an inbound message from the given phone
-     * number: today's exercise link if there's a matching active purchase, or a
-     * sales-page nudge otherwise.
+     * number:
+     * <ul>
+     *   <li>a matching PAID purchase still mid-challenge gets today's exercise
+     *       link plus a reminder to write back tomorrow;</li>
+     *   <li>a matching PAID purchase on day 30 gets a completion message instead
+     *       of a "come back tomorrow" line;</li>
+     *   <li>no PAID match but a PENDING purchase for the phone gets a
+     *       payment-confirmation-in-progress message;</li>
+     *   <li>no purchase at all gets a sales-page nudge.</li>
+     * </ul>
      */
     @Transactional(readOnly = true)
     public String buildWhatsAppReply(String rawFromPhone) {
-        return findActiveByPhone(rawFromPhone)
-                .map(purchase -> {
-                    int currentDay = computeCurrentDay(purchase.getPurchaseDate());
-                    return "¡Hola " + firstName(purchase.getBuyerName()) + "! 👋 Tu ejercicio de hoy (Día "
-                            + currentDay + " de " + TOTAL_DAYS + ") te espera acá: "
-                            + whatsAppProperties.getDesafioPlayBaseUrl() + "/" + purchase.getAccessToken();
-                })
-                .orElseGet(() -> "¡Hola! No encontramos ninguna compra activa asociada a este número. "
-                        + "Conocé el Desafío 30 días de TIAM acá: " + whatsAppProperties.getSalesPageUrl());
+        Optional<ChallengePurchase> activePurchase = findActiveByPhone(rawFromPhone);
+        if (activePurchase.isPresent()) {
+            ChallengePurchase purchase = activePurchase.get();
+            int currentDay = computeCurrentDay(purchase.getPurchaseDate());
+            String firstName = firstName(purchase.getBuyerName());
+            String link = whatsAppProperties.getDesafioPlayBaseUrl() + "/" + purchase.getAccessToken();
+
+            if (currentDay < TOTAL_DAYS) {
+                return "¡Hola " + firstName + "! 👋 Tu ejercicio de hoy (Día " + currentDay + " de " + TOTAL_DAYS
+                        + ") te espera acá: " + link
+                        + "\n\n📌 Mañana escribinos \"desafío\" de nuevo y te paso el Día " + (currentDay + 1) + ".";
+            }
+
+            return "¡Hola " + firstName + "! 👋 Este es tu último ejercicio (Día " + TOTAL_DAYS + " de " + TOTAL_DAYS
+                    + "): " + link
+                    + "\n\n🎉 ¡Completaste el Desafío 30 días! Gracias por acompañarnos.";
+        }
+
+        if (hasPendingPurchase(rawFromPhone)) {
+            return "¡Hola! 👋 Estamos confirmando tu pago. En cuanto se acredite, escribinos \"desafío\" de nuevo"
+                    + " y te mando tu primer ejercicio. 🙌";
+        }
+
+        return "¡Hola! No encontramos ninguna compra activa asociada a este número. "
+                + "Conocé el Desafío 30 días de TIAM acá: " + whatsAppProperties.getSalesPageUrl();
+    }
+
+    /**
+     * True if the phone has a still-PENDING purchase (payment not yet confirmed
+     * by the MP webhook) — used to distinguish "we're waiting on your payment"
+     * from "you've never purchased" in {@link #buildWhatsAppReply}.
+     */
+    private boolean hasPendingPurchase(String rawPhone) {
+        String normalized = PhoneNumberUtil.normalize(rawPhone);
+        if (normalized.isEmpty()) {
+            return false;
+        }
+        return challengePurchaseRepository.findByPhoneAndActivoTrue(normalized).stream()
+                .anyMatch(p -> p.getStatus() == ChallengePurchaseStatus.PENDING);
     }
 
     /**
