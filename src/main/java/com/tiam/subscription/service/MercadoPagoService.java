@@ -131,6 +131,12 @@ public class MercadoPagoService {
             requestBuilder.payer(PreferencePayerRequest.builder().email(payerEmail).build());
         }
 
+        // Attach a per-preference notification_url so MP posts the payment webhook for THIS
+        // payment explicitly (the app-level Webhooks config is unreliable in sandbox/test mode).
+        if (StringUtils.hasText(plansProperties.getNotificationUrl())) {
+            requestBuilder.notificationUrl(plansProperties.getNotificationUrl());
+        }
+
         PreferenceClient client = new PreferenceClient();
         Preference preference = client.create(requestBuilder.build());
 

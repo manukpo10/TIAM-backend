@@ -51,6 +51,7 @@ public class MercadoPagoWebhookController {
     public ResponseEntity<Void> handleWebhook(
             @RequestBody(required = false) Map<String, Object> payload,
             @RequestParam(required = false) String type,
+            @RequestParam(required = false) String topic,
             @RequestParam(required = false) String id,
             @RequestParam(value = "data.id", required = false) String dataId,
             HttpServletRequest request) {
@@ -60,7 +61,8 @@ public class MercadoPagoWebhookController {
         // of this method did) let an attacker keep a validly-signed request while
         // smuggling a different id via another field — the signature would pass but
         // a different resource would be processed.
-        String notificationType = resolveType(payload, type);
+        // Webhooks v1 sends "type"; the older IPN (per-preference notification_url) sends "topic".
+        String notificationType = resolveType(payload, StringUtils.hasText(type) ? type : topic);
         String resourceId = resolveId(payload, StringUtils.hasText(id) ? id : dataId);
 
         if (!isValidSignature(request, resourceId)) {
