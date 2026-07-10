@@ -79,6 +79,23 @@ public class ChallengePurchaseService {
      */
     @Transactional(readOnly = true)
     public ChallengeAccessResponse getAccess(String accessToken) {
+        ChallengePurchase purchase = resolvePaidPurchase(accessToken);
+        int currentDay = computeCurrentDay(purchase.getPurchaseDate());
+
+        return new ChallengeAccessResponse(firstName(purchase.getBuyerName()), currentDay, TOTAL_DAYS);
+    }
+
+    /**
+     * Resolves an access token to its PAID purchase, or throws 404 —
+     * deliberately not distinguishing "unknown token" from "known but
+     * unpaid/pending/failed" so an unauthenticated caller can't enumerate
+     * which tokens exist or their status. Shared with
+     * {@link com.tiam.challenge.service.ChallengeDayResultService}, which
+     * needs the exact same anti-enumeration behavior — package-private on
+     * purpose, not part of the public cross-package API.
+     */
+    @Transactional(readOnly = true)
+    ChallengePurchase resolvePaidPurchase(String accessToken) {
         ChallengePurchase purchase = challengePurchaseRepository.findByAccessTokenAndActivoTrue(accessToken)
                 .orElseThrow(() -> new ResourceNotFoundException("Challenge access not found: " + accessToken));
 
@@ -86,12 +103,15 @@ public class ChallengePurchaseService {
             throw new ResourceNotFoundException("Challenge access not found: " + accessToken);
         }
 
-        int currentDay = computeCurrentDay(purchase.getPurchaseDate());
-
-        return new ChallengeAccessResponse(firstName(purchase.getBuyerName()), currentDay, TOTAL_DAYS);
+        return purchase;
     }
 
-    private int computeCurrentDay(Instant purchaseDate) {
+    /**
+     * Package-private (not private) so {@link ChallengeDayResultService} can
+     * reuse the exact same day-unlock arithmetic — no client input, so it's
+     * safe to expose within the package without extra validation.
+     */
+    int computeCurrentDay(Instant purchaseDate) {
         LocalDate purchaseDay = purchaseDate.atZone(ZONE).toLocalDate();
         LocalDate today = LocalDate.now(ZONE);
         long elapsed = ChronoUnit.DAYS.between(purchaseDay, today);
