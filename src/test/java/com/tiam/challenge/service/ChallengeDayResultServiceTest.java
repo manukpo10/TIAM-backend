@@ -127,16 +127,6 @@ class ChallengeDayResultServiceTest {
     }
 
     @Test
-    void completeDay_cardTypeDay_throwsBadRequest() {
-        // Day 6 is a 'card' day in challengeContent.ts (reflection content,
-        // area "memoria") — it has no completion event to record.
-        givenPurchase(10);
-
-        assertThatThrownBy(() -> service.completeDay(ACCESS_TOKEN, 6, new CompleteDayRequest(0, 5)))
-            .isInstanceOf(BadRequestException.class);
-    }
-
-    @Test
     void completeDay_unknownOrUnpaidToken_throwsNotFound() {
         when(challengePurchaseService.resolvePaidPurchase(ACCESS_TOKEN))
             .thenThrow(new ResourceNotFoundException("Challenge access not found: " + ACCESS_TOKEN));
@@ -213,37 +203,18 @@ class ChallengeDayResultServiceTest {
     // --- getProgress: streak --------------------------------------------------------
 
     @Test
-    void getProgress_streakSpansACardDay_treatsCardDayAsPassThrough() {
-        // Purchase 6 days ago -> currentDay = 7. Day 6 is a 'card' day in
-        // challengeContent.ts (reflection content, no completion event), so it
-        // must not need a result of its own to keep the streak alive across it.
+    void getProgress_missingGameDay_breaksStreak() {
+        // Purchase 6 days ago -> currentDay = 7, day 4 has no result.
         Instant purchaseDate = Instant.now().minusSeconds(6 * 86_400L);
         givenPurchase(purchaseDate, 7);
         givenResults(List.of(
             resultForDay(1), resultForDay(2), resultForDay(3),
-            resultForDay(4), resultForDay(5), resultForDay(7)
-        )); // no result recorded for day 6 (card) — by design, completeDay rejects it
+            resultForDay(5), resultForDay(6), resultForDay(7)
+        )); // day 4 missing breaks the chain
 
         ChallengeProgressResponse progress = service.getProgress(ACCESS_TOKEN);
 
-        assertThat(progress.streak().current()).isEqualTo(7);
-        assertThat(progress.streak().longest()).isEqualTo(7);
-    }
-
-    @Test
-    void getProgress_missingGameDay_breaksStreakUnlikeACardDay() {
-        // Same 7-day window, but day 4 (a 'game' day) has no result — unlike the
-        // day-6 card gap above, a missing game day must break the chain.
-        Instant purchaseDate = Instant.now().minusSeconds(6 * 86_400L);
-        givenPurchase(purchaseDate, 7);
-        givenResults(List.of(
-            resultForDay(1), resultForDay(2), resultForDay(3),
-            resultForDay(5), resultForDay(7)
-        )); // day 4 (game) missing and breaks the chain; day 6 (card) still passes through
-
-        ChallengeProgressResponse progress = service.getProgress(ACCESS_TOKEN);
-
-        assertThat(progress.streak().current()).isEqualTo(3); // day5 -> day6(pass) -> day7
+        assertThat(progress.streak().current()).isEqualTo(3); // day5 -> day6 -> day7
         assertThat(progress.streak().longest()).isEqualTo(3); // ties the day1-3 run
     }
 

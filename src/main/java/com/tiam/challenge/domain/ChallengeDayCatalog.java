@@ -30,7 +30,7 @@ public final class ChallengeDayCatalog {
             Map.entry(3, new DayInfo(ChallengeDayType.GAME, "lenguaje")),
             Map.entry(4, new DayInfo(ChallengeDayType.GAME, "atencion")),
             Map.entry(5, new DayInfo(ChallengeDayType.GAME, "calculo")),
-            Map.entry(6, new DayInfo(ChallengeDayType.CARD, "memoria")),
+            Map.entry(6, new DayInfo(ChallengeDayType.GAME, "praxias")),
             Map.entry(7, new DayInfo(ChallengeDayType.GAME, "ejecutivas")),
             Map.entry(8, new DayInfo(ChallengeDayType.GAME, "lenguaje")),
             Map.entry(9, new DayInfo(ChallengeDayType.GAME, "praxias")),
@@ -47,14 +47,14 @@ public final class ChallengeDayCatalog {
             Map.entry(20, new DayInfo(ChallengeDayType.GAME, "lenguaje")),
             Map.entry(21, new DayInfo(ChallengeDayType.GAME, "ejecutivas")),
             Map.entry(22, new DayInfo(ChallengeDayType.GAME, "calculo")),
-            Map.entry(23, new DayInfo(ChallengeDayType.CARD, "memoria")),
+            Map.entry(23, new DayInfo(ChallengeDayType.GAME, "agnosias")),
             Map.entry(24, new DayInfo(ChallengeDayType.GAME, "atencion")),
             Map.entry(25, new DayInfo(ChallengeDayType.GAME, "ejecutivas")),
             Map.entry(26, new DayInfo(ChallengeDayType.GAME, "lenguaje")),
             Map.entry(27, new DayInfo(ChallengeDayType.GAME, "agnosias")),
-            Map.entry(28, new DayInfo(ChallengeDayType.CARD, "memoria")),
+            Map.entry(28, new DayInfo(ChallengeDayType.GAME, "orientacion")),
             Map.entry(29, new DayInfo(ChallengeDayType.GAME, "ejecutivas")),
-            Map.entry(30, new DayInfo(ChallengeDayType.CARD, "memoria")));
+            Map.entry(30, new DayInfo(ChallengeDayType.GAME, "calculo")));
 
     public static final int TOTAL_DAYS = DAYS.size();
 
