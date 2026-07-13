@@ -276,13 +276,13 @@ class ChallengeDayResultServiceTest {
     // --- getProgress: area breakdown --------------------------------------------------
 
     @Test
-    void getProgress_noResults_includesAllSevenAreasWithZeroPlayed() {
+    void getProgress_noResults_includesAllEightAreasWithZeroPlayed() {
         givenPurchase(Instant.now(), 1);
         givenResults(List.of());
 
         ChallengeProgressResponse progress = service.getProgress(ACCESS_TOKEN);
 
-        assertThat(progress.areaBreakdown()).hasSize(7);
+        assertThat(progress.areaBreakdown()).hasSize(8);
         assertThat(progress.areaBreakdown()).allSatisfy(a -> {
             assertThat(a.played()).isZero();
             assertThat(a.averageStars()).isZero();

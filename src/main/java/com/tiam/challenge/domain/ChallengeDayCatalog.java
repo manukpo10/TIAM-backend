@@ -16,8 +16,8 @@ import java.util.Map;
  * duplicates the frontend's {@code CHALLENGE_TOTAL_DAYS}.
  *
  * {@code area} values match the frontend's {@code ChallengeArea} union
- * exactly: memoria, atencion, lenguaje, praxias, calculo, orientacion,
- * ejecutivas.
+ * exactly: memoria, atencion, lenguaje, praxias, agnosias, calculo,
+ * orientacion, ejecutivas.
  */
 public final class ChallengeDayCatalog {
 
@@ -39,10 +39,10 @@ public final class ChallengeDayCatalog {
             Map.entry(12, new DayInfo(ChallengeDayType.GAME, "ejecutivas")),
             Map.entry(13, new DayInfo(ChallengeDayType.GAME, "atencion")),
             Map.entry(14, new DayInfo(ChallengeDayType.GAME, "lenguaje")),
-            Map.entry(15, new DayInfo(ChallengeDayType.CARD, "memoria")),
+            Map.entry(15, new DayInfo(ChallengeDayType.GAME, "memoria")),
             Map.entry(16, new DayInfo(ChallengeDayType.GAME, "ejecutivas")),
             Map.entry(17, new DayInfo(ChallengeDayType.GAME, "atencion")),
-            Map.entry(18, new DayInfo(ChallengeDayType.GAME, "praxias")),
+            Map.entry(18, new DayInfo(ChallengeDayType.GAME, "agnosias")),
             Map.entry(19, new DayInfo(ChallengeDayType.GAME, "memoria")),
             Map.entry(20, new DayInfo(ChallengeDayType.GAME, "lenguaje")),
             Map.entry(21, new DayInfo(ChallengeDayType.GAME, "ejecutivas")),
@@ -51,7 +51,7 @@ public final class ChallengeDayCatalog {
             Map.entry(24, new DayInfo(ChallengeDayType.GAME, "atencion")),
             Map.entry(25, new DayInfo(ChallengeDayType.GAME, "ejecutivas")),
             Map.entry(26, new DayInfo(ChallengeDayType.GAME, "lenguaje")),
-            Map.entry(27, new DayInfo(ChallengeDayType.GAME, "praxias")),
+            Map.entry(27, new DayInfo(ChallengeDayType.GAME, "agnosias")),
             Map.entry(28, new DayInfo(ChallengeDayType.CARD, "memoria")),
             Map.entry(29, new DayInfo(ChallengeDayType.GAME, "ejecutivas")),
             Map.entry(30, new DayInfo(ChallengeDayType.CARD, "memoria")));
@@ -61,9 +61,9 @@ public final class ChallengeDayCatalog {
     public static final long GAME_DAY_COUNT =
             DAYS.values().stream().filter(d -> d.type() == ChallengeDayType.GAME).count();
 
-    /** All 7 cognitive areas, in a stable display order — used to build a zero-played breakdown. */
+    /** All 8 cognitive areas, in a stable display order — used to build a zero-played breakdown. */
     public static final List<String> AREAS = List.of(
-            "memoria", "atencion", "lenguaje", "praxias", "calculo", "orientacion", "ejecutivas");
+            "memoria", "atencion", "lenguaje", "praxias", "agnosias", "calculo", "orientacion", "ejecutivas");
 
     private ChallengeDayCatalog() {}
 
