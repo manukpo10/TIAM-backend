@@ -100,6 +100,21 @@ class ChallengeDayResultServiceTest {
         assertThat(response.stars()).isEqualTo(1);
     }
 
+    @Test
+    void completeDay_paperAndPencilDay_zeroAttempts_awardsThreeStarsForParticipation() {
+        // Papel-y-lápiz days (6, 12, 18, 30) report (mistakes:0, totalAttempts:0).
+        // 0 attempts is treated as full accuracy so the day counts (3 stars por
+        // participar) and keeps the streak alive, without dividing by zero. Day 6 is
+        // a GAME day in the catalog.
+        givenPurchase(6);
+        givenNoExistingResult(6);
+
+        ChallengeDayResultResponse response = service.completeDay(ACCESS_TOKEN, 6, new CompleteDayRequest(0, 0));
+
+        assertThat(response.stars()).isEqualTo(3);
+        assertThat(response.totalAttempts()).isZero();
+    }
+
     // --- completeDay: validation -------------------------------------------------
 
     @Test
