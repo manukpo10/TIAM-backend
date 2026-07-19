@@ -54,7 +54,7 @@ public final class ChallengeDayCatalog {
             Map.entry(27, new DayInfo(ChallengeDayType.GAME, "agnosias")),
             Map.entry(28, new DayInfo(ChallengeDayType.GAME, "lenguaje")),
             Map.entry(29, new DayInfo(ChallengeDayType.GAME, "agnosias")),
-            Map.entry(30, new DayInfo(ChallengeDayType.GAME, "calculo")));
+            Map.entry(30, new DayInfo(ChallengeDayType.GAME, "memoria")));
 
     public static final int TOTAL_DAYS = DAYS.size();
 
