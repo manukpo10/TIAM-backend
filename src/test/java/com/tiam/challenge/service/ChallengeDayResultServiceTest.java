@@ -162,7 +162,7 @@ class ChallengeDayResultServiceTest {
         ArgumentCaptor<ChallengeDayResult> captor = ArgumentCaptor.forClass(ChallengeDayResult.class);
         verify(challengeDayResultRepository).save(captor.capture());
         assertThat(captor.getValue().getStars()).isEqualTo(3);
-        assertThat(captor.getValue().getArea()).isEqualTo("orientacion"); // day 1's catalog area
+        assertThat(captor.getValue().getArea()).isEqualTo("lenguaje"); // day 1's catalog area
         assertThat(captor.getValue().getPlayedAt()).isNotNull();
     }
 

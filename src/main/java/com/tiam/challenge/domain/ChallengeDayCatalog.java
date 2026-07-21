@@ -25,7 +25,7 @@ public final class ChallengeDayCatalog {
     public record DayInfo(ChallengeDayType type, String area) {}
 
     private static final Map<Integer, DayInfo> DAYS = Map.ofEntries(
-            Map.entry(1, new DayInfo(ChallengeDayType.GAME, "orientacion")),
+            Map.entry(1, new DayInfo(ChallengeDayType.GAME, "lenguaje")),
             Map.entry(2, new DayInfo(ChallengeDayType.GAME, "memoria")),
             Map.entry(3, new DayInfo(ChallengeDayType.GAME, "lenguaje")),
             Map.entry(4, new DayInfo(ChallengeDayType.GAME, "atencion")),
@@ -37,7 +37,7 @@ public final class ChallengeDayCatalog {
             Map.entry(10, new DayInfo(ChallengeDayType.GAME, "ejecutivas")),
             Map.entry(11, new DayInfo(ChallengeDayType.GAME, "atencion")),
             Map.entry(12, new DayInfo(ChallengeDayType.GAME, "ejecutivas")),
-            Map.entry(13, new DayInfo(ChallengeDayType.GAME, "atencion")),
+            Map.entry(13, new DayInfo(ChallengeDayType.GAME, "orientacion")),
             Map.entry(14, new DayInfo(ChallengeDayType.GAME, "lenguaje")),
             Map.entry(15, new DayInfo(ChallengeDayType.GAME, "memoria")),
             Map.entry(16, new DayInfo(ChallengeDayType.GAME, "ejecutivas")),
