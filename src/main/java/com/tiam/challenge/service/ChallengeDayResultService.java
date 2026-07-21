@@ -172,9 +172,18 @@ public class ChallengeDayResultService {
         return badges;
     }
 
+    /**
+     * Groups by the CURRENT catalog area for each result's day, never by the
+     * area stored on the row. "Por área" answers "how am I doing on X right
+     * now" — a question about today's curriculum — so a result completed
+     * before a later área rebalance must be re-bucketed under its day's
+     * current area, not left under whatever the catalog said at play-time.
+     * Trusting the stored value let a played-count exceed an area's current
+     * total after any rebalance (see ChallengeDayResultServiceTest).
+     */
     private List<ChallengeAreaBreakdownResponse> computeAreaBreakdown(List<ChallengeDayResult> results) {
         Map<String, List<ChallengeDayResult>> byArea = results.stream()
-                .collect(Collectors.groupingBy(ChallengeDayResult::getArea));
+                .collect(Collectors.groupingBy(r -> ChallengeDayCatalog.dayInfo(r.getDay()).area()));
 
         return ChallengeDayCatalog.AREAS.stream()
                 .map(area -> {

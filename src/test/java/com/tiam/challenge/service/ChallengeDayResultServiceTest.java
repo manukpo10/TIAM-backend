@@ -3,6 +3,7 @@ package com.tiam.challenge.service;
 import com.tiam.challenge.domain.ChallengeDayResult;
 import com.tiam.challenge.domain.ChallengePurchase;
 import com.tiam.challenge.domain.ChallengePurchaseStatus;
+import com.tiam.challenge.dto.ChallengeAreaBreakdownResponse;
 import com.tiam.challenge.dto.ChallengeBadgeResponse;
 import com.tiam.challenge.dto.ChallengeDayResultResponse;
 import com.tiam.challenge.dto.ChallengeProgressResponse;
@@ -276,6 +277,27 @@ class ChallengeDayResultServiceTest {
     }
 
     @Test
+    void getProgress_areaBreakdown_usesCurrentCatalogAreaNotStaleStoredValue() {
+        // resultForDay's fixture always stores area="memoria" regardless of day —
+        // día 1's REAL catalog area is "lenguaje" (it was "orientacion" earlier
+        // still, before a later rebalance; the point is the stored column can go
+        // stale whenever a day's área is reassigned after it was already
+        // completed). The "por área" breakdown answers "how am I doing on X
+        // right now", a question about the CURRENT curriculum — it must not
+        // trust a result's stored área, or a rebalance silently corrupts past
+        // players' stats (a completed count that can exceed the área's current
+        // total, exactly the bug a real progress screen surfaced).
+        givenPurchase(Instant.now(), 1);
+        ChallengeDayResult staleArea = resultForDay(1); // stored area="memoria"
+        givenResults(List.of(staleArea));
+
+        ChallengeProgressResponse progress = service.getProgress(ACCESS_TOKEN);
+
+        assertThat(areaBreakdown(progress, "lenguaje").played()).isEqualTo(1); // día 1's CURRENT area
+        assertThat(areaBreakdown(progress, "memoria").played()).isZero(); // not the stale stored one
+    }
+
+    @Test
     void getProgress_unknownOrUnpaidToken_throwsNotFound() {
         when(challengePurchaseService.resolvePaidPurchase(ACCESS_TOKEN))
             .thenThrow(new ResourceNotFoundException("Challenge access not found: " + ACCESS_TOKEN));
@@ -334,6 +356,13 @@ class ChallengeDayResultServiceTest {
     private ChallengeBadgeResponse badge(ChallengeProgressResponse progress, String code) {
         return progress.badges().stream()
             .filter(b -> b.code().equals(code))
+            .findFirst()
+            .orElseThrow();
+    }
+
+    private ChallengeAreaBreakdownResponse areaBreakdown(ChallengeProgressResponse progress, String area) {
+        return progress.areaBreakdown().stream()
+            .filter(a -> a.area().equals(area))
             .findFirst()
             .orElseThrow();
     }
