@@ -5,6 +5,7 @@ import com.mercadopago.exceptions.MPException;
 import com.mercadopago.resources.payment.Payment;
 import com.mercadopago.resources.preapproval.Preapproval;
 import com.tiam.challenge.service.ChallengePurchaseService;
+import com.tiam.common.exception.ResourceNotFoundException;
 import com.tiam.subscription.config.MercadoPagoProperties;
 import com.tiam.subscription.service.MercadoPagoService;
 import com.tiam.subscription.service.SubscriptionService;
@@ -20,6 +21,7 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -44,8 +46,23 @@ public class MercadoPagoWebhookController {
 
     /**
      * Receives Mercado Pago IPN/webhook notifications.
-     * Must return 200 quickly — MP retries on any non-200 response.
      * Path: POST /webhooks/mercadopago
+     *
+     * <p>Status code contract (MP retries on any non-200 response, so this matters):
+     * <ul>
+     *   <li><b>200</b> — the notification was handled, OR retrying can't possibly help:
+     *       unknown notification type, missing/non-numeric externalReference, a status
+     *       we deliberately ignore like {@code in_process}, MP not configured, the local
+     *       id doesn't exist ({@link ResourceNotFoundException}), or MP itself says the
+     *       resource doesn't exist ({@link MPApiException} with HTTP 404 — e.g. MP's
+     *       dashboard sends simulated test notifications with fabricated ids).</li>
+     *   <li><b>401</b> — signature validation failed; a forged/invalid request must not
+     *       trigger MP retries.</li>
+     *   <li><b>5xx</b> — a genuine transient/unexpected or operator-fixable failure (MP
+     *       API 5xx/429, bad credentials, network error, DB error, unexpected
+     *       RuntimeException) so MP retries the notification instead of us silently
+     *       losing it.</li>
+     * </ul>
      */
     @PostMapping("/mercadopago")
     public ResponseEntity<Void> handleWebhook(
@@ -67,17 +84,40 @@ public class MercadoPagoWebhookController {
 
         if (!isValidSignature(request, resourceId)) {
             log.warn("MP webhook rejected: invalid signature (type={})", notificationType);
-            return ResponseEntity.ok().build();
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
 
         log.info("MP webhook received: type={} id={}", notificationType, resourceId);
 
         try {
             processNotification(notificationType, resourceId);
-        } catch (Exception e) {
-            // Log and ack — never fail a webhook, MP will retry
+        } catch (ResourceNotFoundException e) {
+            // Permanent failure — the local id encoded in externalReference doesn't
+            // exist. Retrying can never change that, so ack instead of looping forever.
+            log.warn("MP webhook: {} — acking without retry (permanent failure, type={} id={})",
+                    e.getMessage(), notificationType, resourceId);
+            return ResponseEntity.ok().build();
+        } catch (MPApiException e) {
+            if (e.getStatusCode() == HttpStatus.NOT_FOUND.value()) {
+                // Permanent — MP itself says the resource doesn't exist (e.g. MP's
+                // dashboard sends simulated test notifications with fabricated ids).
+                // Retrying is futile; ack instead of looping forever.
+                log.warn("MP webhook: MP returned 404 for type={} id={} — acking without retry",
+                        notificationType, resourceId);
+                return ResponseEntity.ok().build();
+            }
+            // Any other MP API error (5xx, 429 rate limit, 401/403 bad credentials,
+            // etc.) is transient or operator-fixable — worth retrying.
             log.error("Error processing MP webhook type={} id={}: {}", notificationType, resourceId,
                     e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        } catch (Exception e) {
+            // Transient/unexpected failure (MP API blip, network error, DB error,
+            // unexpected RuntimeException) — return 5xx so MP retries the notification
+            // instead of it being lost forever. Never leak exception details in the body.
+            log.error("Error processing MP webhook type={} id={}: {}", notificationType, resourceId,
+                    e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
 
         return ResponseEntity.ok().build();
