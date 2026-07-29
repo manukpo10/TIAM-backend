@@ -34,3 +34,5 @@ services:
         sync: false
       - key: MP_NOTIFICATION_URL
         sync: false
+      - key: CHALLENGE_BACK_URL
+        sync: false
