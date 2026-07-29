@@ -1,7 +1,9 @@
 package com.tiam.challenge.repository;
 
 import com.tiam.challenge.domain.ChallengePurchase;
+import com.tiam.challenge.domain.ChallengePurchaseStatus;
 import jakarta.persistence.LockModeType;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -20,4 +22,13 @@ public interface ChallengePurchaseRepository extends JpaRepository<ChallengePurc
      */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     Optional<ChallengePurchase> findWithLockById(Long id);
+
+    /**
+     * Used by {@link com.tiam.challenge.service.ChallengePurchaseReconciliationService}
+     * to find purchases whose webhook notification may have been lost: stuck in the
+     * given status, created within the [from, to] window (grace-period cutoff as the
+     * upper bound, lookback cutoff as the lower bound).
+     */
+    List<ChallengePurchase> findByStatusAndActivoTrueAndCreatedAtBetween(
+            ChallengePurchaseStatus status, Instant from, Instant to);
 }

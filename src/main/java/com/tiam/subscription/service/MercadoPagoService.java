@@ -12,6 +12,8 @@ import com.mercadopago.client.preference.PreferencePayerRequest;
 import com.mercadopago.client.preference.PreferenceRequest;
 import com.mercadopago.exceptions.MPApiException;
 import com.mercadopago.exceptions.MPException;
+import com.mercadopago.net.MPResultsResourcesPage;
+import com.mercadopago.net.MPSearchRequest;
 import com.mercadopago.resources.payment.Payment;
 import com.mercadopago.resources.preapproval.Preapproval;
 import com.mercadopago.resources.preference.Preference;
@@ -20,7 +22,10 @@ import com.tiam.subscription.config.MercadoPagoProperties;
 import com.tiam.subscription.config.PlansProperties;
 import com.tiam.subscription.domain.ProfessionalPlan;
 import java.math.BigDecimal;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -156,6 +161,49 @@ public class MercadoPagoService {
         initSdk();
         PaymentClient client = new PaymentClient();
         return client.get(Long.parseLong(paymentId));
+    }
+
+    /**
+     * Searches Mercado Pago for payments carrying the given {@code external_reference}
+     * (the local purchase id) — used by
+     * {@link com.tiam.challenge.service.ChallengePurchaseReconciliationService} to
+     * recover purchases whose webhook notification was never delivered, since a PENDING
+     * purchase has no {@code mp_payment_id} to look up directly.
+     *
+     * <p>A checkout retry (e.g. a first card declined, then a second attempt) can
+     * produce more than one {@link Payment} under the same external_reference. When
+     * that happens we prefer an approved one — the purchase was ultimately paid, even
+     * if an earlier attempt failed — and otherwise fall back to the most recently
+     * created payment.
+     */
+    public Optional<Payment> findLatestPaymentByExternalReference(String externalReference)
+            throws MPException, MPApiException {
+        initSdk();
+
+        // limit/offset MUST be set explicitly: MPSearchRequest.getParameters() inserts
+        // "limit"/"offset" into the query-param map even when unset (as a null value),
+        // and the SDK's UrlFormatter.format() calls toString() on every param value with
+        // no null guard — an unset limit/offset throws a NullPointerException at search
+        // time. 10 is comfortably more than the checkout retries a single purchase could
+        // realistically produce.
+        MPSearchRequest searchRequest = MPSearchRequest.builder()
+                .filters(Map.of("external_reference", externalReference))
+                .limit(10)
+                .offset(0)
+                .build();
+
+        PaymentClient client = new PaymentClient();
+        MPResultsResourcesPage<Payment> page = client.search(searchRequest);
+        List<Payment> results = page.getResults();
+
+        if (results == null || results.isEmpty()) {
+            return Optional.empty();
+        }
+
+        return results.stream()
+                .filter(p -> "approved".equals(p.getStatus()))
+                .findFirst()
+                .or(() -> results.stream().max(Comparator.comparing(Payment::getDateCreated)));
     }
 
     /**

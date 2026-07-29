@@ -70,6 +70,14 @@ tiam:
     notification-url: ${MP_NOTIFICATION_URL:}
   challenge:
     back-url: ${CHALLENGE_BACK_URL:http://localhost:5173/desafio-30-dias/exito}
+    reconciliation:
+      # Safety net for lost webhook notifications — see ChallengePurchaseReconciliationService.
+      enabled: ${CHALLENGE_RECONCILIATION_ENABLED:true}
+      interval-ms: ${CHALLENGE_RECONCILIATION_INTERVAL_MS:900000} # 15 minutes
+      grace-period-minutes: ${CHALLENGE_RECONCILIATION_GRACE_PERIOD_MINUTES:10}
+      # 30, not a short "abandoned cart" window — see ChallengeReconciliationProperties
+      # for why (cash-coupon payments can confirm days after the purchase was created).
+      lookback-days: ${CHALLENGE_RECONCILIATION_LOOKBACK_DAYS:30}
   whatsapp:
     access-token: ${WHATSAPP_ACCESS_TOKEN:}
     phone-number-id: ${WHATSAPP_PHONE_NUMBER_ID:}
