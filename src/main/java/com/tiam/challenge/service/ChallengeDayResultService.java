@@ -53,6 +53,7 @@ public class ChallengeDayResultService {
     public ChallengeDayResultResponse completeDay(String accessToken, int day, CompleteDayRequest request) {
         ChallengePurchase purchase = challengePurchaseService.resolvePaidPurchase(accessToken);
         int currentDay = challengePurchaseService.computeCurrentDay(purchase.getPurchaseDate());
+        int challengeMonth = purchase.getChallengeMonth();
 
         if (day < 1 || day > currentDay) {
             throw new BadRequestException("Day " + day + " is not unlocked yet");
@@ -62,8 +63,9 @@ public class ChallengeDayResultService {
         }
 
         // day is within [1, currentDay] and currentDay is already clamped to
-        // [1, 30] by computeCurrentDay, so this is always a valid catalog key.
-        ChallengeDayCatalog.DayInfo dayInfo = ChallengeDayCatalog.dayInfo(day);
+        // [1, 30] by computeCurrentDay, so this is always a valid catalog key —
+        // for whichever month this purchase belongs to.
+        ChallengeDayCatalog.DayInfo dayInfo = ChallengeDayCatalog.dayInfo(challengeMonth, day);
         if (dayInfo.type() != ChallengeDayType.GAME) {
             // 'card' days are static reflection content with no completion event —
             // there's nothing to grade, so recording a result for one is rejected
@@ -115,15 +117,16 @@ public class ChallengeDayResultService {
     public ChallengeProgressResponse getProgress(String accessToken) {
         ChallengePurchase purchase = challengePurchaseService.resolvePaidPurchase(accessToken);
         int currentDay = challengePurchaseService.computeCurrentDay(purchase.getPurchaseDate());
+        int challengeMonth = purchase.getChallengeMonth();
 
         List<ChallengeDayResult> results = challengeDayResultRepository
                 .findByChallengePurchaseIdAndActivoTrueOrderByDayAsc(purchase.getId());
         Map<Integer, ChallengeDayResult> resultsByDay = results.stream()
                 .collect(Collectors.toMap(ChallengeDayResult::getDay, r -> r));
 
-        ChallengeStreakResponse streak = computeStreak(resultsByDay, currentDay);
+        ChallengeStreakResponse streak = computeStreak(resultsByDay, currentDay, challengeMonth);
         List<ChallengeBadgeResponse> badges = computeBadges(results, streak);
-        List<ChallengeAreaBreakdownResponse> areaBreakdown = computeAreaBreakdown(results);
+        List<ChallengeAreaBreakdownResponse> areaBreakdown = computeAreaBreakdown(results, challengeMonth);
         List<ChallengeDayResultResponse> days = results.stream().map(this::toResponse).toList();
 
         return new ChallengeProgressResponse(days, streak, badges, areaBreakdown);
@@ -138,11 +141,12 @@ public class ChallengeDayResultService {
      * "current" is the run ending exactly at currentDay: if today's game hasn't
      * been played yet, current reads 0 until it is.
      */
-    private ChallengeStreakResponse computeStreak(Map<Integer, ChallengeDayResult> resultsByDay, int currentDay) {
+    private ChallengeStreakResponse computeStreak(
+            Map<Integer, ChallengeDayResult> resultsByDay, int currentDay, int challengeMonth) {
         int running = 0;
         int longest = 0;
         for (int day = 1; day <= currentDay; day++) {
-            ChallengeDayCatalog.DayInfo dayInfo = ChallengeDayCatalog.dayInfo(day);
+            ChallengeDayCatalog.DayInfo dayInfo = ChallengeDayCatalog.dayInfo(challengeMonth, day);
             boolean alive = dayInfo.type() != ChallengeDayType.GAME || resultsByDay.containsKey(day);
             running = alive ? running + 1 : 0;
             longest = Math.max(longest, running);
@@ -181,9 +185,10 @@ public class ChallengeDayResultService {
      * Trusting the stored value let a played-count exceed an area's current
      * total after any rebalance (see ChallengeDayResultServiceTest).
      */
-    private List<ChallengeAreaBreakdownResponse> computeAreaBreakdown(List<ChallengeDayResult> results) {
+    private List<ChallengeAreaBreakdownResponse> computeAreaBreakdown(
+            List<ChallengeDayResult> results, int challengeMonth) {
         Map<String, List<ChallengeDayResult>> byArea = results.stream()
-                .collect(Collectors.groupingBy(r -> ChallengeDayCatalog.dayInfo(r.getDay()).area()));
+                .collect(Collectors.groupingBy(r -> ChallengeDayCatalog.dayInfo(challengeMonth, r.getDay()).area()));
 
         return ChallengeDayCatalog.AREAS.stream()
                 .map(area -> {

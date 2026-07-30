@@ -45,10 +45,20 @@ public class ChallengePurchaseService {
      */
     @Transactional
     public CreatePurchaseResponse createPurchase(CreatePurchaseRequest request) {
+        Integer requestedMonth = request.challengeMonth();
+        if (requestedMonth != null && requestedMonth != 1 && requestedMonth != 2) {
+            // Small allowlist check, not a generic range validator — only months 1
+            // and 2 exist today. Checked before isConfigured()/persistence so a bad
+            // value fails fast with a clean 400 instead of a 500 later when the
+            // day-catalog lookup rejects it at play time.
+            throw new BadRequestException("Unsupported challenge month: " + requestedMonth);
+        }
         if (!mercadoPagoService.isConfigured()) {
             throw new BadRequestException(
                     "Payment processing is not available yet. Please try again later.");
         }
+
+        int challengeMonth = requestedMonth != null ? requestedMonth : 1;
 
         ChallengePurchase purchase = new ChallengePurchase();
         purchase.setBuyerName(request.buyerName());
@@ -56,19 +66,31 @@ public class ChallengePurchaseService {
         purchase.setEmail(request.email());
         purchase.setStatus(ChallengePurchaseStatus.PENDING);
         purchase.setAccessToken(UUID.randomUUID().toString());
+        purchase.setChallengeMonth(challengeMonth);
         purchase = challengePurchaseRepository.save(purchase);
 
         String externalReference = String.valueOf(purchase.getId());
+        String itemTitle = itemTitleFor(challengeMonth);
 
         try {
             String initPoint = mercadoPagoService.createPreference(
-                    ITEM_TITLE, PRICE_ARS, request.email(), externalReference);
+                    itemTitle, PRICE_ARS, request.email(), externalReference);
             return new CreatePurchaseResponse(initPoint);
         } catch (MPException | MPApiException e) {
             log.error("Failed to create MP preference for purchase id={}: {}",
                     purchase.getId(), e.getMessage(), e);
             throw new BadRequestException("Could not start checkout: " + e.getMessage());
         }
+    }
+
+    /**
+     * Month 1 keeps the original title untouched (no buyer-facing behavior change).
+     * Month 2+ appends " - Mes {N}" so the buyer's Mercado Pago receipt/checkout
+     * screen distinguishes it from a month-1 purchase — this is presentation only,
+     * it has no bearing on which catalog {@link #createPurchase} actually grants.
+     */
+    private String itemTitleFor(int challengeMonth) {
+        return challengeMonth > 1 ? ITEM_TITLE + " - Mes " + challengeMonth : ITEM_TITLE;
     }
 
     /**
@@ -82,7 +104,8 @@ public class ChallengePurchaseService {
         ChallengePurchase purchase = resolvePaidPurchase(accessToken);
         int currentDay = computeCurrentDay(purchase.getPurchaseDate());
 
-        return new ChallengeAccessResponse(firstName(purchase.getBuyerName()), currentDay, TOTAL_DAYS);
+        return new ChallengeAccessResponse(
+                firstName(purchase.getBuyerName()), currentDay, TOTAL_DAYS, purchase.getChallengeMonth());
     }
 
     /**

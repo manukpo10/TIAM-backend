@@ -8,6 +8,7 @@ import com.tiam.challenge.domain.ChallengePurchaseStatus;
 import com.tiam.challenge.dto.ChallengeAccessResponse;
 import com.tiam.challenge.dto.CreatePurchaseRequest;
 import com.tiam.challenge.repository.ChallengePurchaseRepository;
+import com.tiam.common.exception.BadRequestException;
 import com.tiam.common.exception.ResourceNotFoundException;
 import com.tiam.subscription.service.MercadoPagoService;
 import org.junit.jupiter.api.BeforeEach;
@@ -26,6 +27,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -113,6 +115,32 @@ class ChallengePurchaseServiceTest {
     }
 
     @Test
+    void getAccess_month1Purchase_returnsChallengeMonth1() {
+        // Purchase built via the fixture never sets challengeMonth explicitly, so it
+        // relies on the entity's own default — proves getAccess surfaces that default
+        // rather than hardcoding 1 itself.
+        givenPurchase(purchase("Manuel Robles", ChallengePurchaseStatus.PAID, Instant.now()));
+
+        ChallengeAccessResponse response = service.getAccess(ACCESS_TOKEN);
+
+        assertThat(response.challengeMonth()).isEqualTo(1);
+    }
+
+    @Test
+    void getAccess_month2Purchase_returnsChallengeMonth2() {
+        // The frontend has no other way to know which catalog/game registry to
+        // render for this access token before any day is completed — it must read
+        // this field off the access response.
+        ChallengePurchase month2Purchase = purchase("Manuel Robles", ChallengePurchaseStatus.PAID, Instant.now());
+        month2Purchase.setChallengeMonth(2);
+        givenPurchase(month2Purchase);
+
+        ChallengeAccessResponse response = service.getAccess(ACCESS_TOKEN);
+
+        assertThat(response.challengeMonth()).isEqualTo(2);
+    }
+
+    @Test
     void getAccess_unknownToken_throwsNotFound() {
         when(challengePurchaseRepository.findByAccessTokenAndActivoTrue(ACCESS_TOKEN))
             .thenReturn(Optional.empty());
@@ -156,13 +184,141 @@ class ChallengePurchaseServiceTest {
                 .thenReturn("http://mock-init-point");
 
         CreatePurchaseRequest request =
-                new CreatePurchaseRequest("Manuel Robles", "11 2233-4455", "buyer@example.com");
+                new CreatePurchaseRequest("Manuel Robles", "11 2233-4455", "buyer@example.com", null);
 
         service.createPurchase(request);
 
         ArgumentCaptor<ChallengePurchase> captor = ArgumentCaptor.forClass(ChallengePurchase.class);
         verify(challengePurchaseRepository).save(captor.capture());
         assertThat(captor.getValue().getPhone()).isEqualTo("541122334455");
+    }
+
+    // --- createPurchase: challengeMonth --------------------------------------------
+
+    @Test
+    void createPurchase_noMonthSpecified_defaultsPurchaseToMonth1() throws MPException, MPApiException {
+        when(mercadoPagoService.isConfigured()).thenReturn(true);
+        when(challengePurchaseRepository.save(any(ChallengePurchase.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(mercadoPagoService.createPreference(any(), any(), any(), any()))
+                .thenReturn("http://mock-init-point");
+
+        CreatePurchaseRequest request =
+                new CreatePurchaseRequest("Manuel Robles", "11 2233-4455", "buyer@example.com", null);
+
+        service.createPurchase(request);
+
+        ArgumentCaptor<ChallengePurchase> captor = ArgumentCaptor.forClass(ChallengePurchase.class);
+        verify(challengePurchaseRepository).save(captor.capture());
+        assertThat(captor.getValue().getChallengeMonth()).isEqualTo(1);
+    }
+
+    @Test
+    void createPurchase_noMonthSpecified_usesBaseItemTitleWithNoMonthSuffix()
+            throws MPException, MPApiException {
+        when(mercadoPagoService.isConfigured()).thenReturn(true);
+        when(challengePurchaseRepository.save(any(ChallengePurchase.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(mercadoPagoService.createPreference(any(), any(), any(), any()))
+                .thenReturn("http://mock-init-point");
+
+        CreatePurchaseRequest request =
+                new CreatePurchaseRequest("Manuel Robles", "11 2233-4455", "buyer@example.com", null);
+
+        service.createPurchase(request);
+
+        ArgumentCaptor<String> titleCaptor = ArgumentCaptor.forClass(String.class);
+        verify(mercadoPagoService).createPreference(titleCaptor.capture(), any(), any(), any());
+        assertThat(titleCaptor.getValue()).isEqualTo("Desafío 30 días - TIAM Digital");
+    }
+
+    @Test
+    void createPurchase_month2_storesMonthOnThePurchase() throws MPException, MPApiException {
+        when(mercadoPagoService.isConfigured()).thenReturn(true);
+        when(challengePurchaseRepository.save(any(ChallengePurchase.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(mercadoPagoService.createPreference(any(), any(), any(), any()))
+                .thenReturn("http://mock-init-point");
+
+        CreatePurchaseRequest request =
+                new CreatePurchaseRequest("Manuel Robles", "11 2233-4455", "buyer@example.com", 2);
+
+        service.createPurchase(request);
+
+        ArgumentCaptor<ChallengePurchase> captor = ArgumentCaptor.forClass(ChallengePurchase.class);
+        verify(challengePurchaseRepository).save(captor.capture());
+        assertThat(captor.getValue().getChallengeMonth()).isEqualTo(2);
+    }
+
+    @Test
+    void createPurchase_month2_appendsMonthToItemTitle() throws MPException, MPApiException {
+        when(mercadoPagoService.isConfigured()).thenReturn(true);
+        when(challengePurchaseRepository.save(any(ChallengePurchase.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(mercadoPagoService.createPreference(any(), any(), any(), any()))
+                .thenReturn("http://mock-init-point");
+
+        CreatePurchaseRequest request =
+                new CreatePurchaseRequest("Manuel Robles", "11 2233-4455", "buyer@example.com", 2);
+
+        service.createPurchase(request);
+
+        ArgumentCaptor<String> titleCaptor = ArgumentCaptor.forClass(String.class);
+        verify(mercadoPagoService).createPreference(titleCaptor.capture(), any(), any(), any());
+        assertThat(titleCaptor.getValue()).isEqualTo("Desafío 30 días - TIAM Digital - Mes 2");
+    }
+
+    @Test
+    void createPurchase_explicitMonth1_isAccepted() throws MPException, MPApiException {
+        // 1 sent explicitly (not null) must be treated the same as "absent" — it's
+        // in the allowlist, not just the implicit default.
+        when(mercadoPagoService.isConfigured()).thenReturn(true);
+        when(challengePurchaseRepository.save(any(ChallengePurchase.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(mercadoPagoService.createPreference(any(), any(), any(), any()))
+                .thenReturn("http://mock-init-point");
+
+        CreatePurchaseRequest request =
+                new CreatePurchaseRequest("Manuel Robles", "11 2233-4455", "buyer@example.com", 1);
+
+        service.createPurchase(request);
+
+        verify(challengePurchaseRepository).save(any(ChallengePurchase.class));
+    }
+
+    @Test
+    void createPurchase_unsupportedMonthAboveTwo_throwsBadRequestAndPersistsNothing() {
+        // Validation must short-circuit before isConfigured()/persistence/MP — no
+        // stub for mercadoPagoService.isConfigured() here on purpose: reaching it
+        // for real (not as a stub setup) would fail verifyNoInteractions below.
+        // Asserting on the message (not just the exception type) matters here:
+        // the pre-existing "MP not configured" guard also throws a bare
+        // BadRequestException, and with isConfigured() unstubbed (defaults to
+        // false) that guard would produce a false-green for the wrong reason if
+        // this test only checked isInstanceOf.
+        CreatePurchaseRequest request =
+                new CreatePurchaseRequest("Manuel Robles", "11 2233-4455", "buyer@example.com", 3);
+
+        assertThatThrownBy(() -> service.createPurchase(request))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("challenge month");
+
+        verifyNoInteractions(challengePurchaseRepository, mercadoPagoService);
+    }
+
+    @Test
+    void createPurchase_unsupportedMonthZero_throwsBadRequest() {
+        // Guards that the "positive but not in {1,2}" allowlist doesn't
+        // accidentally accept non-positive values too (an off-by-one a ">2"
+        // check alone would miss).
+        CreatePurchaseRequest request =
+                new CreatePurchaseRequest("Manuel Robles", "11 2233-4455", "buyer@example.com", 0);
+
+        assertThatThrownBy(() -> service.createPurchase(request))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("challenge month");
+
+        verifyNoInteractions(challengePurchaseRepository, mercadoPagoService);
     }
 
     @Test
@@ -188,6 +344,27 @@ class ChallengePurchaseServiceTest {
         Optional<ChallengePurchase> result = service.findActiveByPhone("541122334455");
 
         assertThat(result).contains(newer);
+    }
+
+    @Test
+    void findActiveByPhone_paidMatchesAcrossDifferentMonths_returnsMostRecentByPurchaseDate() {
+        // Buying month 2 is a brand-new purchase row, always dated later than an
+        // older month-1 purchase for the same phone. findActiveByPhone's existing
+        // "most recent by purchaseDate" logic must already prefer it — this proves
+        // that holds without needing any month-aware change to the method itself.
+        ChallengePurchase month1Older = purchase("Ana Diaz", ChallengePurchaseStatus.PAID,
+                Instant.now().minus(10, ChronoUnit.DAYS));
+        month1Older.setChallengeMonth(1);
+        ChallengePurchase month2Newer = purchase("Ana Diaz", ChallengePurchaseStatus.PAID,
+                Instant.now().minus(1, ChronoUnit.DAYS));
+        month2Newer.setChallengeMonth(2);
+        when(challengePurchaseRepository.findByPhoneAndActivoTrue("541122334455"))
+                .thenReturn(List.of(month1Older, month2Newer));
+
+        Optional<ChallengePurchase> result = service.findActiveByPhone("541122334455");
+
+        assertThat(result).contains(month2Newer);
+        assertThat(result.get().getChallengeMonth()).isEqualTo(2);
     }
 
     @Test

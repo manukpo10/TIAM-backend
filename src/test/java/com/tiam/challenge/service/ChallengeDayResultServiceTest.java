@@ -216,6 +216,35 @@ class ChallengeDayResultServiceTest {
         assertThat(existing.getMistakes()).isEqualTo(2);
     }
 
+    // --- completeDay: month-aware catalog ------------------------------------------
+
+    @Test
+    void completeDay_month2Purchase_derivesAreaFromMonth2CatalogNotMonth1() {
+        // Día 4 is "atencion" in month 1's catalog but "calculo" in month 2's —
+        // proves completeDay looks up area using the PURCHASE's own month, not
+        // always month 1.
+        givenPurchase(Instant.now(), 4, 2);
+        givenNoExistingResult(4);
+
+        ChallengeDayResultResponse response =
+            service.completeDay(ACCESS_TOKEN, 4, new CompleteDayRequest(0, 10));
+
+        assertThat(response.area()).isEqualTo("calculo");
+    }
+
+    @Test
+    void completeDay_month1Purchase_stillDerivesAreaFromMonth1Catalog() {
+        // Same día 4, but a month-1 purchase — must keep resolving to month 1's
+        // "atencion", not accidentally default to month 2's mapping.
+        givenPurchase(Instant.now(), 4, 1);
+        givenNoExistingResult(4);
+
+        ChallengeDayResultResponse response =
+            service.completeDay(ACCESS_TOKEN, 4, new CompleteDayRequest(0, 10));
+
+        assertThat(response.area()).isEqualTo("atencion");
+    }
+
     // --- getProgress: streak --------------------------------------------------------
 
     @Test
@@ -297,6 +326,36 @@ class ChallengeDayResultServiceTest {
         assertThat(areaBreakdown(progress, "memoria").played()).isZero(); // not the stale stored one
     }
 
+    // --- getProgress: month-aware catalog ----------------------------------------
+
+    @Test
+    void getProgress_month2Purchase_areaBreakdownUsesMonth2CatalogNotMonth1() {
+        // Same día 4 divergence as completeDay's, exercised through the separate
+        // computeAreaBreakdown code path used by getProgress.
+        givenPurchase(Instant.now(), 4, 2);
+        ChallengeDayResult day4Result = resultForDay(4); // fixture always stores area="memoria" — irrelevant here
+        givenResults(List.of(day4Result));
+
+        ChallengeProgressResponse progress = service.getProgress(ACCESS_TOKEN);
+
+        assertThat(areaBreakdown(progress, "calculo").played()).isEqualTo(1); // month 2's área for día 4
+        assertThat(areaBreakdown(progress, "atencion").played()).isZero(); // month 1's área for día 4 — must not leak in
+    }
+
+    @Test
+    void getProgress_month2Purchase_streakComputesAcrossAllThirtyDaysWithoutError() {
+        // Type (GAME) doesn't differ between months today, but this proves the
+        // month parameter is correctly threaded through computeStreak's catalog
+        // lookups for every day 1..30, not just the one day under test elsewhere —
+        // an unthreaded month would throw "Unknown challenge day" via the wrong catalog.
+        givenPurchase(Instant.now().minusSeconds(40L * 86_400), 30, 2);
+        givenResults(List.of());
+
+        ChallengeProgressResponse progress = service.getProgress(ACCESS_TOKEN);
+
+        assertThat(progress.streak().current()).isZero();
+    }
+
     @Test
     void getProgress_unknownOrUnpaidToken_throwsNotFound() {
         when(challengePurchaseService.resolvePaidPurchase(ACCESS_TOKEN))
@@ -309,15 +368,20 @@ class ChallengeDayResultServiceTest {
     // --- fixtures ---------------------------------------------------------------------
 
     private void givenPurchase(int currentDay) {
-        givenPurchase(Instant.now(), currentDay);
+        givenPurchase(Instant.now(), currentDay, 1);
     }
 
     private void givenPurchase(Instant purchaseDate, int currentDay) {
+        givenPurchase(purchaseDate, currentDay, 1);
+    }
+
+    private void givenPurchase(Instant purchaseDate, int currentDay, int challengeMonth) {
         ChallengePurchase purchase = new ChallengePurchase();
         purchase.setId(PURCHASE_ID);
         purchase.setStatus(ChallengePurchaseStatus.PAID);
         purchase.setAccessToken(ACCESS_TOKEN);
         purchase.setPurchaseDate(purchaseDate);
+        purchase.setChallengeMonth(challengeMonth);
         when(challengePurchaseService.resolvePaidPurchase(ACCESS_TOKEN)).thenReturn(purchase);
         when(challengePurchaseService.computeCurrentDay(purchaseDate)).thenReturn(currentDay);
     }

@@ -37,4 +37,13 @@ public class ChallengePurchase extends BaseEntity {
 
     @Column(name = "mp_payment_id")
     private String mpPaymentId;
+
+    /**
+     * Which 30-day catalog this purchase grants access to (1 = original, 2 = the
+     * independent "Mes 2" catalog — see {@link ChallengeDayCatalog}). Defaults to 1
+     * both here and at the DB column so pre-existing rows and any code path that
+     * forgets to set it explicitly still behave as month 1.
+     */
+    @Column(name = "challenge_month", nullable = false)
+    private Integer challengeMonth = 1;
 }
