@@ -22,6 +22,11 @@ class ChallengeDayCatalogTest {
         assertThat(ChallengeDayCatalog.dayInfo(1, 4).area()).isEqualTo("atencion");
         assertThat(ChallengeDayCatalog.dayInfo(1, 9).area()).isEqualTo("praxias");
         assertThat(ChallengeDayCatalog.dayInfo(1, 13).area()).isEqualTo("orientacion");
+        // día 22 was "lenguaje" (¿Qué oficio es?) until it was replaced by an
+        // "ejecutivas" game (OficioIdeal) — this catalog wasn't updated at the
+        // time, which silently pushed a played day into the wrong area's count
+        // on the progress panel (a real bug caught live, not hypothetical).
+        assertThat(ChallengeDayCatalog.dayInfo(1, 22).area()).isEqualTo("ejecutivas");
         assertThat(ChallengeDayCatalog.dayInfo(1, 30).area()).isEqualTo("memoria");
     }
 
