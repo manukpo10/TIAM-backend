@@ -46,9 +46,9 @@ public class ChallengePurchaseService {
     @Transactional
     public CreatePurchaseResponse createPurchase(CreatePurchaseRequest request) {
         Integer requestedMonth = request.challengeMonth();
-        if (requestedMonth != null && requestedMonth != 1 && requestedMonth != 2) {
-            // Small allowlist check, not a generic range validator — only months 1
-            // and 2 exist today. Checked before isConfigured()/persistence so a bad
+        if (requestedMonth != null && requestedMonth != 1 && requestedMonth != 2 && requestedMonth != 3) {
+            // Small allowlist check, not a generic range validator — only months 1-3
+            // exist today. Checked before isConfigured()/persistence so a bad
             // value fails fast with a clean 400 instead of a 500 later when the
             // day-catalog lookup rejects it at play time.
             throw new BadRequestException("Unsupported challenge month: " + requestedMonth);
