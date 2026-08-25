@@ -47,11 +47,11 @@ class ChallengeDayCatalogTest {
                 Map.entry(7, "lenguaje"), Map.entry(8, "memoria"), Map.entry(9, "atencion"),
                 Map.entry(10, "ejecutivas"), Map.entry(11, "lenguaje"), Map.entry(12, "praxias"),
                 Map.entry(13, "orientacion"), Map.entry(14, "lenguaje"), Map.entry(15, "ejecutivas"),
-                Map.entry(16, "memoria"), Map.entry(17, "agnosias"), Map.entry(18, "atencion"),
+                Map.entry(16, "memoria"), Map.entry(17, "lenguaje"), Map.entry(18, "atencion"),
                 Map.entry(19, "lenguaje"), Map.entry(20, "praxias"), Map.entry(21, "ejecutivas"),
                 Map.entry(22, "calculo"), Map.entry(23, "memoria"), Map.entry(24, "atencion"),
                 Map.entry(25, "lenguaje"), Map.entry(26, "ejecutivas"), Map.entry(27, "orientacion"),
-                Map.entry(28, "atencion"), Map.entry(29, "calculo"), Map.entry(30, "agnosias"));
+                Map.entry(28, "atencion"), Map.entry(29, "calculo"), Map.entry(30, "calculo"));
 
         expectedAreaByDay.forEach((day, expectedArea) ->
                 assertThat(ChallengeDayCatalog.dayInfo(2, day).area())
@@ -87,7 +87,10 @@ class ChallengeDayCatalogTest {
 
     @Test
     void dayInfo_unknownMonth_throws() {
-        assertThatThrownBy(() -> ChallengeDayCatalog.dayInfo(3, 1))
+        // Month 3 used to be unsupported when this test was written; it's a real
+        // catalog now (see DAYS_MONTH_3), so asserting against it here would be
+        // asserting the wrong thing — month 4 is the genuinely unknown one today.
+        assertThatThrownBy(() -> ChallengeDayCatalog.dayInfo(4, 1))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 

@@ -85,7 +85,15 @@ public final class ChallengeDayCatalog {
             Map.entry(14, new DayInfo(ChallengeDayType.GAME, "lenguaje")),
             Map.entry(15, new DayInfo(ChallengeDayType.GAME, "ejecutivas")),
             Map.entry(16, new DayInfo(ChallengeDayType.GAME, "memoria")),
-            Map.entry(17, new DayInfo(ChallengeDayType.GAME, "agnosias")),
+            // día 17 was "agnosias" (Es esta sombra) until it was replaced by a
+            // "lenguaje" game (Letras revueltas), and día 30 was "agnosias"
+            // (Figuras superpuestas +) until it was replaced by a "calculo" game
+            // (Antes y después) — this catalog wasn't updated at the time,
+            // which would have silently pushed a played day into the wrong
+            // area's count on the progress panel (same bug class as día 22 of
+            // month 1, see the comment on that assertion in
+            // ChallengeDayCatalogTest).
+            Map.entry(17, new DayInfo(ChallengeDayType.GAME, "lenguaje")),
             Map.entry(18, new DayInfo(ChallengeDayType.GAME, "atencion")),
             Map.entry(19, new DayInfo(ChallengeDayType.GAME, "lenguaje")),
             Map.entry(20, new DayInfo(ChallengeDayType.GAME, "praxias")),
@@ -98,7 +106,7 @@ public final class ChallengeDayCatalog {
             Map.entry(27, new DayInfo(ChallengeDayType.GAME, "orientacion")),
             Map.entry(28, new DayInfo(ChallengeDayType.GAME, "atencion")),
             Map.entry(29, new DayInfo(ChallengeDayType.GAME, "calculo")),
-            Map.entry(30, new DayInfo(ChallengeDayType.GAME, "agnosias")));
+            Map.entry(30, new DayInfo(ChallengeDayType.GAME, "calculo")));
 
     /** "Mes 3" — independent catalog, same day count/type shape as months 1-2, different areas. */
     private static final Map<Integer, DayInfo> DAYS_MONTH_3 = Map.ofEntries(
