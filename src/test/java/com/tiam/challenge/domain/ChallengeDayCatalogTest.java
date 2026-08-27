@@ -95,8 +95,17 @@ class ChallengeDayCatalogTest {
     }
 
     @Test
-    void totalDaysAndGameDayCount_areThirtyForTheSharedShape() {
+    void totalDays_isThirtyForEveryMonth() {
         assertThat(ChallengeDayCatalog.TOTAL_DAYS).isEqualTo(30);
-        assertThat(ChallengeDayCatalog.GAME_DAY_COUNT).isEqualTo(30);
+    }
+
+    @Test
+    void gameDayCount_isThirtyForMonthsOneAndTwo_butMonth3HasOneCardDay() {
+        assertThat(ChallengeDayCatalog.gameDayCount(1)).isEqualTo(30);
+        assertThat(ChallengeDayCatalog.gameDayCount(2)).isEqualTo(30);
+        // día 14 is the catalog's first CARD day (lápiz-y-papel, no completion
+        // event) — see its entry in DAYS_MONTH_3 and challengeContent.ts.
+        assertThat(ChallengeDayCatalog.gameDayCount(3)).isEqualTo(29);
+        assertThat(ChallengeDayCatalog.dayInfo(3, 14).type()).isEqualTo(ChallengeDayType.CARD);
     }
 }

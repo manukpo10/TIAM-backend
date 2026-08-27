@@ -19,16 +19,15 @@ import java.util.Map;
  * exactly: memoria, atencion, lenguaje, praxias, agnosias, calculo,
  * orientacion, ejecutivas.
  *
- * <p>"Mes 2" (month 2) is a completely independent one-time-purchase 30-day
- * catalog (see {@link com.tiam.challenge.domain.ChallengePurchase#getChallengeMonth()}) —
- * same day count and same all-GAME day-type shape as month 1, different
- * day→area assignments. {@link #TOTAL_DAYS} and {@link #GAME_DAY_COUNT} are
- * intentionally derived from month 1's table only, not parameterized by
- * month: both months currently share the same 30-day / all-GAME shape, so a
- * per-month value would be identical today and this avoids threading month
- * through every badge/streak proportional-threshold call site for no
- * observable behavior change. Revisit if a future month ever has a different
- * day count or day-type mix.
+ * <p>Each month (see {@link com.tiam.challenge.domain.ChallengePurchase#getChallengeMonth()})
+ * is a completely independent one-time-purchase 30-day catalog with its own
+ * day→area assignments, all sharing the same 30-day total. {@link #TOTAL_DAYS}
+ * stays global (every month is 30 days) but the GAME/CARD mix is NOT
+ * guaranteed identical across months — month 3's día 14 is the catalog's
+ * first CARD day (a lápiz-y-papel exercise with no completion event), so
+ * "how many game days" is now genuinely month-specific. Use
+ * {@link #gameDayCount(int)}, never a single global count, anywhere that
+ * threshold matters (badges, streaks).
  */
 public final class ChallengeDayCatalog {
 
@@ -123,7 +122,7 @@ public final class ChallengeDayCatalog {
             Map.entry(11, new DayInfo(ChallengeDayType.GAME, "calculo")),
             Map.entry(12, new DayInfo(ChallengeDayType.GAME, "praxias")),
             Map.entry(13, new DayInfo(ChallengeDayType.GAME, "orientacion")),
-            Map.entry(14, new DayInfo(ChallengeDayType.GAME, "agnosias")),
+            Map.entry(14, new DayInfo(ChallengeDayType.CARD, "lenguaje")),
             Map.entry(15, new DayInfo(ChallengeDayType.GAME, "ejecutivas")),
             Map.entry(16, new DayInfo(ChallengeDayType.GAME, "lenguaje")),
             Map.entry(17, new DayInfo(ChallengeDayType.GAME, "memoria")),
@@ -143,8 +142,10 @@ public final class ChallengeDayCatalog {
 
     public static final int TOTAL_DAYS = DAYS_MONTH_1.size();
 
-    public static final long GAME_DAY_COUNT =
-            DAYS_MONTH_1.values().stream().filter(d -> d.type() == ChallengeDayType.GAME).count();
+    /** How many of this month's 30 days are actually completable games — see class doc. */
+    public static long gameDayCount(int challengeMonth) {
+        return catalogFor(challengeMonth).values().stream().filter(d -> d.type() == ChallengeDayType.GAME).count();
+    }
 
     /** All 8 cognitive areas, in a stable display order — used to build a zero-played breakdown. */
     public static final List<String> AREAS = List.of(

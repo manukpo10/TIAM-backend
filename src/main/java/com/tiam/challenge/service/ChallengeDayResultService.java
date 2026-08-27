@@ -33,9 +33,6 @@ public class ChallengeDayResultService {
     private static final double THREE_STAR_ACCURACY = 0.85;
     private static final double TWO_STAR_ACCURACY = 0.6;
 
-    // "Halfway" is proportional to the *playable* (game-type) day count, not to 30 —
-    // derived from the catalog so it can't drift if that count ever changes.
-    private static final long HALFWAY_GAME_DAYS = (long) Math.ceil(ChallengeDayCatalog.GAME_DAY_COUNT / 2.0);
     private static final int STREAK_BADGE_SHORT = 3;
     private static final int STREAK_BADGE_LONG = 7;
 
@@ -125,7 +122,7 @@ public class ChallengeDayResultService {
                 .collect(Collectors.toMap(ChallengeDayResult::getDay, r -> r));
 
         ChallengeStreakResponse streak = computeStreak(resultsByDay, currentDay, challengeMonth);
-        List<ChallengeBadgeResponse> badges = computeBadges(results, streak);
+        List<ChallengeBadgeResponse> badges = computeBadges(results, streak, challengeMonth);
         List<ChallengeAreaBreakdownResponse> areaBreakdown = computeAreaBreakdown(results, challengeMonth);
         List<ChallengeDayResultResponse> days = results.stream().map(this::toResponse).toList();
 
@@ -158,20 +155,24 @@ public class ChallengeDayResultService {
      * Fixed, non-exhaustive badge set. Streak badges use the longest streak
      * ever reached (not the current one) so they stay earned even after a
      * later missed day resets the current streak — badges are permanent.
+     * HALFWAY/CHALLENGE_COMPLETE are proportional to THIS month's playable
+     * (game-type) day count, not a fixed 30 — see ChallengeDayCatalog's class
+     * doc for why that can no longer be a single global constant.
      */
     private List<ChallengeBadgeResponse> computeBadges(
-            List<ChallengeDayResult> results, ChallengeStreakResponse streak) {
+            List<ChallengeDayResult> results, ChallengeStreakResponse streak, int challengeMonth) {
         // completeDay rejects 'card' days, so every persisted result is a game day.
         int gameDaysPlayed = results.size();
         boolean anyThreeStars = results.stream().anyMatch(r -> r.getStars() == 3);
+        long gameDayCount = ChallengeDayCatalog.gameDayCount(challengeMonth);
+        long halfwayGameDays = (long) Math.ceil(gameDayCount / 2.0);
 
         List<ChallengeBadgeResponse> badges = new ArrayList<>();
         badges.add(new ChallengeBadgeResponse("FIRST_DAY", !results.isEmpty()));
         badges.add(new ChallengeBadgeResponse("STREAK_3", streak.longest() >= STREAK_BADGE_SHORT));
         badges.add(new ChallengeBadgeResponse("STREAK_7", streak.longest() >= STREAK_BADGE_LONG));
-        badges.add(new ChallengeBadgeResponse("HALFWAY", gameDaysPlayed >= HALFWAY_GAME_DAYS));
-        badges.add(new ChallengeBadgeResponse(
-                "CHALLENGE_COMPLETE", gameDaysPlayed >= ChallengeDayCatalog.GAME_DAY_COUNT));
+        badges.add(new ChallengeBadgeResponse("HALFWAY", gameDaysPlayed >= halfwayGameDays));
+        badges.add(new ChallengeBadgeResponse("CHALLENGE_COMPLETE", gameDaysPlayed >= gameDayCount));
         badges.add(new ChallengeBadgeResponse("PERFECT_DAY", anyThreeStars));
         return badges;
     }
