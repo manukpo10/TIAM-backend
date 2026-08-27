@@ -126,7 +126,7 @@ public final class ChallengeDayCatalog {
             Map.entry(15, new DayInfo(ChallengeDayType.GAME, "ejecutivas")),
             Map.entry(16, new DayInfo(ChallengeDayType.GAME, "lenguaje")),
             Map.entry(17, new DayInfo(ChallengeDayType.GAME, "memoria")),
-            Map.entry(18, new DayInfo(ChallengeDayType.GAME, "atencion")),
+            Map.entry(18, new DayInfo(ChallengeDayType.GAME, "lenguaje")),
             Map.entry(19, new DayInfo(ChallengeDayType.GAME, "calculo")),
             Map.entry(20, new DayInfo(ChallengeDayType.GAME, "praxias")),
             Map.entry(21, new DayInfo(ChallengeDayType.GAME, "orientacion")),
