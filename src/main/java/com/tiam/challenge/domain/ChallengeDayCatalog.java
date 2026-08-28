@@ -23,9 +23,10 @@ import java.util.Map;
  * is a completely independent one-time-purchase 30-day catalog with its own
  * day→area assignments, all sharing the same 30-day total. {@link #TOTAL_DAYS}
  * stays global (every month is 30 days) but the GAME/CARD mix is NOT
- * guaranteed identical across months — month 3's día 14 is the catalog's
- * first CARD day (a lápiz-y-papel exercise with no completion event), so
- * "how many game days" is now genuinely month-specific. Use
+ * guaranteed identical across months — month 3's día 14 was the catalog's
+ * first CARD day (a lápiz-y-papel exercise with no completion event), and
+ * día 28 later joined it, so "how many game days" is now genuinely
+ * month-specific. Use
  * {@link #gameDayCount(int)}, never a single global count, anywhere that
  * threshold matters (badges, streaks).
  */
@@ -136,7 +137,7 @@ public final class ChallengeDayCatalog {
             Map.entry(25, new DayInfo(ChallengeDayType.GAME, "calculo")),
             Map.entry(26, new DayInfo(ChallengeDayType.GAME, "praxias")),
             Map.entry(27, new DayInfo(ChallengeDayType.GAME, "atencion")),
-            Map.entry(28, new DayInfo(ChallengeDayType.GAME, "agnosias")),
+            Map.entry(28, new DayInfo(ChallengeDayType.CARD, "orientacion")),
             Map.entry(29, new DayInfo(ChallengeDayType.GAME, "ejecutivas")),
             Map.entry(30, new DayInfo(ChallengeDayType.GAME, "calculo")));
 

@@ -100,12 +100,13 @@ class ChallengeDayCatalogTest {
     }
 
     @Test
-    void gameDayCount_isThirtyForMonthsOneAndTwo_butMonth3HasOneCardDay() {
+    void gameDayCount_isThirtyForMonthsOneAndTwo_butMonth3HasTwoCardDays() {
         assertThat(ChallengeDayCatalog.gameDayCount(1)).isEqualTo(30);
         assertThat(ChallengeDayCatalog.gameDayCount(2)).isEqualTo(30);
-        // día 14 is the catalog's first CARD day (lápiz-y-papel, no completion
-        // event) — see its entry in DAYS_MONTH_3 and challengeContent.ts.
-        assertThat(ChallengeDayCatalog.gameDayCount(3)).isEqualTo(29);
+        // días 14 and 28 are CARD days (lápiz-y-papel, no completion event) —
+        // see their entries in DAYS_MONTH_3 and challengeContent.ts.
+        assertThat(ChallengeDayCatalog.gameDayCount(3)).isEqualTo(28);
         assertThat(ChallengeDayCatalog.dayInfo(3, 14).type()).isEqualTo(ChallengeDayType.CARD);
+        assertThat(ChallengeDayCatalog.dayInfo(3, 28).type()).isEqualTo(ChallengeDayType.CARD);
     }
 }
