@@ -19,6 +19,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.Comparator;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -235,18 +236,35 @@ public class ChallengePurchaseService {
     }
 
     /**
-     * Finds the most recent active, PAID purchase for a phone number (already
-     * normalized or raw — this normalizes internally). Used by the WhatsApp
-     * webhook to correlate an inbound message with a purchase.
+     * Finds the PAID purchase a phone number should keep hearing about via
+     * WhatsApp. Prefers the lowest-numbered month that's still IN PROGRESS
+     * (day &lt; {@link #TOTAL_DAYS}) over the most recently purchased one —
+     * a buyer who bought month 2 while still mid-way through month 1 keeps
+     * getting month 1's daily "desafío" replies until it's actually done,
+     * only then moving on to month 2. Two PAID purchases for the SAME month
+     * (e.g. a support-assisted duplicate) still tie-break by most recent
+     * purchaseDate, matching the single-month behavior this replaced. If
+     * every PAID purchase is already finished, falls back to the most
+     * recently purchased one (so a buyer who completed everything still
+     * gets a sensible "you're done" message instead of an arbitrary earlier
+     * one). Already normalized or raw phone accepted — this normalizes
+     * internally.
      */
     public Optional<ChallengePurchase> findActiveByPhone(String rawPhone) {
         String normalized = PhoneNumberUtil.normalize(rawPhone);
         if (normalized.isEmpty()) {
             return Optional.empty();
         }
-        return challengePurchaseRepository.findByPhoneAndActivoTrue(normalized).stream()
+        List<ChallengePurchase> paid = challengePurchaseRepository.findByPhoneAndActivoTrue(normalized).stream()
                 .filter(p -> p.getStatus() == ChallengePurchaseStatus.PAID && p.getPurchaseDate() != null)
-                .max(Comparator.comparing(ChallengePurchase::getPurchaseDate));
+                .toList();
+        Comparator<ChallengePurchase> byMonthThenMostRecentFirst = Comparator
+                .comparing(ChallengePurchase::getChallengeMonth)
+                .thenComparing(Comparator.comparing(ChallengePurchase::getPurchaseDate).reversed());
+        return paid.stream()
+                .filter(p -> computeCurrentDay(p.getPurchaseDate()) < TOTAL_DAYS)
+                .min(byMonthThenMostRecentFirst)
+                .or(() -> paid.stream().max(Comparator.comparing(ChallengePurchase::getPurchaseDate)));
     }
 
     /**

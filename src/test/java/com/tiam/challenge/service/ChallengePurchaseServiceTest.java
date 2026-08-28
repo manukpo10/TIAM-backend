@@ -548,24 +548,62 @@ class ChallengePurchaseServiceTest {
     }
 
     @Test
-    void findActiveByPhone_paidMatchesAcrossDifferentMonths_returnsMostRecentByPurchaseDate() {
-        // Buying month 2 is a brand-new purchase row, always dated later than an
-        // older month-1 purchase for the same phone. findActiveByPhone's existing
-        // "most recent by purchaseDate" logic must already prefer it — this proves
-        // that holds without needing any month-aware change to the method itself.
-        ChallengePurchase month1Older = purchase("Ana Diaz", ChallengePurchaseStatus.PAID,
+    void findActiveByPhone_earlierMonthStillInProgress_prefersItOverNewerMonth() {
+        // Bought month 2 while still mid-way through month 1: the WhatsApp
+        // "desafío" bot must keep answering about month 1 (the unfinished
+        // one) rather than jumping to the buyer's most recent purchase —
+        // otherwise there'd be no in-band way to ever finish month 1.
+        ChallengePurchase month1InProgress = purchase("Ana Diaz", ChallengePurchaseStatus.PAID,
                 Instant.now().minus(10, ChronoUnit.DAYS));
-        month1Older.setChallengeMonth(1);
+        month1InProgress.setChallengeMonth(1);
         ChallengePurchase month2Newer = purchase("Ana Diaz", ChallengePurchaseStatus.PAID,
                 Instant.now().minus(1, ChronoUnit.DAYS));
         month2Newer.setChallengeMonth(2);
         when(challengePurchaseRepository.findByPhoneAndActivoTrue("541122334455"))
-                .thenReturn(List.of(month1Older, month2Newer));
+                .thenReturn(List.of(month1InProgress, month2Newer));
 
         Optional<ChallengePurchase> result = service.findActiveByPhone("541122334455");
 
-        assertThat(result).contains(month2Newer);
+        assertThat(result).contains(month1InProgress);
+        assertThat(result.get().getChallengeMonth()).isEqualTo(1);
+    }
+
+    @Test
+    void findActiveByPhone_earlierMonthAlreadyFinished_movesOnToNewerMonth() {
+        // Once month 1 is actually done (day 30+), the bot should move on to
+        // the next PAID month that's still in progress.
+        ChallengePurchase month1Finished = purchase("Ana Diaz", ChallengePurchaseStatus.PAID,
+                Instant.now().minus(40, ChronoUnit.DAYS));
+        month1Finished.setChallengeMonth(1);
+        ChallengePurchase month2InProgress = purchase("Ana Diaz", ChallengePurchaseStatus.PAID,
+                Instant.now().minus(5, ChronoUnit.DAYS));
+        month2InProgress.setChallengeMonth(2);
+        when(challengePurchaseRepository.findByPhoneAndActivoTrue("541122334455"))
+                .thenReturn(List.of(month1Finished, month2InProgress));
+
+        Optional<ChallengePurchase> result = service.findActiveByPhone("541122334455");
+
+        assertThat(result).contains(month2InProgress);
         assertThat(result.get().getChallengeMonth()).isEqualTo(2);
+    }
+
+    @Test
+    void findActiveByPhone_allPaidMonthsFinished_fallsBackToMostRecentlyPurchased() {
+        // No purchase is "in progress" anymore — falls back to the most
+        // recently bought one so a buyer who finished everything still gets
+        // a sensible completion message instead of an arbitrary earlier one.
+        ChallengePurchase month1Finished = purchase("Ana Diaz", ChallengePurchaseStatus.PAID,
+                Instant.now().minus(40, ChronoUnit.DAYS));
+        month1Finished.setChallengeMonth(1);
+        ChallengePurchase month2FinishedMoreRecently = purchase("Ana Diaz", ChallengePurchaseStatus.PAID,
+                Instant.now().minus(31, ChronoUnit.DAYS));
+        month2FinishedMoreRecently.setChallengeMonth(2);
+        when(challengePurchaseRepository.findByPhoneAndActivoTrue("541122334455"))
+                .thenReturn(List.of(month1Finished, month2FinishedMoreRecently));
+
+        Optional<ChallengePurchase> result = service.findActiveByPhone("541122334455");
+
+        assertThat(result).contains(month2FinishedMoreRecently);
     }
 
     @Test
