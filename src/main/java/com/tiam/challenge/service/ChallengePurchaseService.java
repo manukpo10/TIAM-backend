@@ -20,7 +20,10 @@ import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.Comparator;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -41,6 +44,17 @@ public class ChallengePurchaseService {
     private final WhatsAppProperties whatsAppProperties;
 
     /**
+     * One JVM-local lock per distinct phone that has ever attempted an
+     * auto-assigned purchase — see the locking note in {@link #createPurchase}.
+     * Never evicted: fine at this product's purchase volume, but it's an
+     * unbounded map over the process lifetime, and it only serializes within
+     * a single app instance. If this backend is ever horizontally scaled,
+     * this needs to become a DB-level lock (e.g. a Postgres advisory lock)
+     * instead.
+     */
+    private final ConcurrentHashMap<String, Object> autoAssignLocksByPhone = new ConcurrentHashMap<>();
+
+    /**
      * Creates a pending purchase and a Mercado Pago checkout preference for it.
      */
     @Transactional
@@ -53,12 +67,47 @@ public class ChallengePurchaseService {
             // day-catalog lookup rejects it at play time.
             throw new BadRequestException("Unsupported challenge month: " + requestedMonth);
         }
+
+        if (requestedMonth != null) {
+            return createPurchaseForMonth(request, requestedMonth);
+        }
+
+        // Auto-assign path only (explicit-month callers have nothing to race
+        // on). Locking per normalized phone closes the literal-interleaving
+        // case: two truly simultaneous requests (double-tap, two open tabs)
+        // both reading nextUnpaidMonth's DB query at the same instant. Held
+        // for the whole purchase (through the DB save), not just the month
+        // computation, so a genuine same-phone retry waits for the first
+        // attempt's row to actually exist before computing its own "next"
+        // month.
+        //
+        // What this does NOT close: nextUnpaidMonth only counts PAID rows
+        // (on purpose — an abandoned PENDING checkout must not permanently
+        // "claim" a month, see its own javadoc), and MP payment confirmation
+        // is asynchronous (the webhook can take anywhere from under a
+        // second to a couple minutes). So two purchase ATTEMPTS for the same
+        // phone spaced seconds-to-minutes apart — not just millisecond-level
+        // concurrent — can still both land on the same auto-assigned month
+        // if the first one hasn't been confirmed PAID yet when the second
+        // one runs; this lock only guarantees they don't corrupt each
+        // other's read, not that the read reflects an in-flight payment.
+        // Closing that fully needs a time-windowed rule (a recent PENDING
+        // purchase also "claims" its month for some grace period before a
+        // retry is allowed to reuse it) — a real product decision on how
+        // long that grace period should be, not implemented here.
+        String normalizedPhone = PhoneNumberUtil.normalize(request.phone());
+        Object lock = autoAssignLocksByPhone.computeIfAbsent(normalizedPhone, key -> new Object());
+        synchronized (lock) {
+            int challengeMonth = nextUnpaidMonth(request.phone());
+            return createPurchaseForMonth(request, challengeMonth);
+        }
+    }
+
+    private CreatePurchaseResponse createPurchaseForMonth(CreatePurchaseRequest request, int challengeMonth) {
         if (!mercadoPagoService.isConfigured()) {
             throw new BadRequestException(
                     "Payment processing is not available yet. Please try again later.");
         }
-
-        int challengeMonth = requestedMonth != null ? requestedMonth : 1;
 
         ChallengePurchase purchase = new ChallengePurchase();
         purchase.setBuyerName(request.buyerName());
@@ -81,6 +130,41 @@ public class ChallengePurchaseService {
                     purchase.getId(), e.getMessage(), e);
             throw new BadRequestException("Could not start checkout: " + e.getMessage());
         }
+    }
+
+    /**
+     * The lowest month (1-3) this phone doesn't already have a PAID purchase
+     * for — first-time buyers get 1, a phone that already has month 1 PAID
+     * gets 2, and so on. Only PAID rows count: an abandoned PENDING checkout
+     * or a FAILED payment for a month doesn't block buying that same month
+     * again. Throws if all 3 are already PAID — there's no month 4 to fall
+     * back to, and silently reassigning an already-owned month would charge
+     * the buyer again for nothing new.
+     *
+     * <p>Only ever called from inside {@link #createPurchase}'s per-phone
+     * {@code synchronized} block — calling it unguarded would reopen the
+     * exact race that locking exists to close.
+     */
+    private int nextUnpaidMonth(String rawPhone) {
+        Set<Integer> paidMonths = paidMonthsFor(rawPhone);
+        for (int month = 1; month <= 3; month++) {
+            if (!paidMonths.contains(month)) {
+                return month;
+            }
+        }
+        throw new BadRequestException(
+                "Ya tenés los 3 meses del Desafío activados — no queda ningún mes nuevo para comprar.");
+    }
+
+    private Set<Integer> paidMonthsFor(String rawPhone) {
+        String normalized = PhoneNumberUtil.normalize(rawPhone);
+        if (normalized.isEmpty()) {
+            return Set.of();
+        }
+        return challengePurchaseRepository.findByPhoneAndActivoTrue(normalized).stream()
+                .filter(p -> p.getStatus() == ChallengePurchaseStatus.PAID)
+                .map(ChallengePurchase::getChallengeMonth)
+                .collect(Collectors.toSet());
     }
 
     /**

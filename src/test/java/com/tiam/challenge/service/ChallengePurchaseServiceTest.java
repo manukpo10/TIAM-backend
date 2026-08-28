@@ -7,6 +7,7 @@ import com.tiam.challenge.domain.ChallengePurchase;
 import com.tiam.challenge.domain.ChallengePurchaseStatus;
 import com.tiam.challenge.dto.ChallengeAccessResponse;
 import com.tiam.challenge.dto.CreatePurchaseRequest;
+import com.tiam.challenge.dto.CreatePurchaseResponse;
 import com.tiam.challenge.repository.ChallengePurchaseRepository;
 import com.tiam.common.exception.BadRequestException;
 import com.tiam.common.exception.ResourceNotFoundException;
@@ -22,10 +23,15 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -287,7 +293,7 @@ class ChallengePurchaseServiceTest {
     }
 
     @Test
-    void createPurchase_unsupportedMonthAboveTwo_throwsBadRequestAndPersistsNothing() {
+    void createPurchase_unsupportedMonthAboveThree_throwsBadRequestAndPersistsNothing() {
         // Validation must short-circuit before isConfigured()/persistence/MP — no
         // stub for mercadoPagoService.isConfigured() here on purpose: reaching it
         // for real (not as a stub setup) would fail verifyNoInteractions below.
@@ -295,15 +301,210 @@ class ChallengePurchaseServiceTest {
         // the pre-existing "MP not configured" guard also throws a bare
         // BadRequestException, and with isConfigured() unstubbed (defaults to
         // false) that guard would produce a false-green for the wrong reason if
-        // this test only checked isInstanceOf.
+        // this test only checked isInstanceOf. Uses 4, not 3 — month 3 is a real,
+        // supported catalog now (see the createPurchase_month3* tests below).
         CreatePurchaseRequest request =
-                new CreatePurchaseRequest("Manuel Robles", "11 2233-4455", "buyer@example.com", 3);
+                new CreatePurchaseRequest("Manuel Robles", "11 2233-4455", "buyer@example.com", 4);
 
         assertThatThrownBy(() -> service.createPurchase(request))
                 .isInstanceOf(BadRequestException.class)
                 .hasMessageContaining("challenge month");
 
         verifyNoInteractions(challengePurchaseRepository, mercadoPagoService);
+    }
+
+    @Test
+    void createPurchase_explicitMonth3_isAccepted() throws MPException, MPApiException {
+        when(mercadoPagoService.isConfigured()).thenReturn(true);
+        when(challengePurchaseRepository.save(any(ChallengePurchase.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(mercadoPagoService.createPreference(any(), any(), any(), any()))
+                .thenReturn("http://mock-init-point");
+
+        CreatePurchaseRequest request =
+                new CreatePurchaseRequest("Manuel Robles", "11 2233-4455", "buyer@example.com", 3);
+
+        service.createPurchase(request);
+
+        ArgumentCaptor<ChallengePurchase> captor = ArgumentCaptor.forClass(ChallengePurchase.class);
+        verify(challengePurchaseRepository).save(captor.capture());
+        assertThat(captor.getValue().getChallengeMonth()).isEqualTo(3);
+    }
+
+    // --- createPurchase: auto-assigning the next unpaid month ----------------------
+
+    @Test
+    void createPurchase_firstTimePhone_autoAssignsMonth1() throws MPException, MPApiException {
+        when(challengePurchaseRepository.findByPhoneAndActivoTrue("541122334455"))
+                .thenReturn(List.of());
+        when(mercadoPagoService.isConfigured()).thenReturn(true);
+        when(challengePurchaseRepository.save(any(ChallengePurchase.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(mercadoPagoService.createPreference(any(), any(), any(), any()))
+                .thenReturn("http://mock-init-point");
+
+        CreatePurchaseRequest request =
+                new CreatePurchaseRequest("Manuel Robles", "11 2233-4455", "buyer@example.com", null);
+
+        service.createPurchase(request);
+
+        ArgumentCaptor<ChallengePurchase> captor = ArgumentCaptor.forClass(ChallengePurchase.class);
+        verify(challengePurchaseRepository).save(captor.capture());
+        assertThat(captor.getValue().getChallengeMonth()).isEqualTo(1);
+    }
+
+    @Test
+    void createPurchase_phoneAlreadyPaidMonth1_autoAssignsMonth2() throws MPException, MPApiException {
+        ChallengePurchase month1 = purchase("Manuel Robles", ChallengePurchaseStatus.PAID, Instant.now());
+        month1.setChallengeMonth(1);
+        when(challengePurchaseRepository.findByPhoneAndActivoTrue("541122334455"))
+                .thenReturn(List.of(month1));
+        when(mercadoPagoService.isConfigured()).thenReturn(true);
+        when(challengePurchaseRepository.save(any(ChallengePurchase.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(mercadoPagoService.createPreference(any(), any(), any(), any()))
+                .thenReturn("http://mock-init-point");
+
+        CreatePurchaseRequest request =
+                new CreatePurchaseRequest("Manuel Robles", "11 2233-4455", "buyer@example.com", null);
+
+        service.createPurchase(request);
+
+        ArgumentCaptor<ChallengePurchase> captor = ArgumentCaptor.forClass(ChallengePurchase.class);
+        verify(challengePurchaseRepository).save(captor.capture());
+        assertThat(captor.getValue().getChallengeMonth()).isEqualTo(2);
+    }
+
+    @Test
+    void createPurchase_phoneHasOnlyPendingMonth1_stillAutoAssignsMonth1() throws MPException, MPApiException {
+        // An abandoned/unfinished checkout for month 1 must NOT count as "already
+        // has month 1" — otherwise a buyer retrying a failed payment would get
+        // silently bumped to month 2 without ever actually owning month 1.
+        ChallengePurchase pendingMonth1 =
+                purchase("Manuel Robles", ChallengePurchaseStatus.PENDING, null);
+        pendingMonth1.setChallengeMonth(1);
+        when(challengePurchaseRepository.findByPhoneAndActivoTrue("541122334455"))
+                .thenReturn(List.of(pendingMonth1));
+        when(mercadoPagoService.isConfigured()).thenReturn(true);
+        when(challengePurchaseRepository.save(any(ChallengePurchase.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(mercadoPagoService.createPreference(any(), any(), any(), any()))
+                .thenReturn("http://mock-init-point");
+
+        CreatePurchaseRequest request =
+                new CreatePurchaseRequest("Manuel Robles", "11 2233-4455", "buyer@example.com", null);
+
+        service.createPurchase(request);
+
+        ArgumentCaptor<ChallengePurchase> captor = ArgumentCaptor.forClass(ChallengePurchase.class);
+        verify(challengePurchaseRepository).save(captor.capture());
+        assertThat(captor.getValue().getChallengeMonth()).isEqualTo(1);
+    }
+
+    @Test
+    void createPurchase_phoneAlreadyPaidMonths1And2_autoAssignsMonth3() throws MPException, MPApiException {
+        ChallengePurchase month1 = purchase("Manuel Robles", ChallengePurchaseStatus.PAID, Instant.now());
+        month1.setChallengeMonth(1);
+        ChallengePurchase month2 = purchase("Manuel Robles", ChallengePurchaseStatus.PAID, Instant.now());
+        month2.setChallengeMonth(2);
+        when(challengePurchaseRepository.findByPhoneAndActivoTrue("541122334455"))
+                .thenReturn(List.of(month1, month2));
+        when(mercadoPagoService.isConfigured()).thenReturn(true);
+        when(challengePurchaseRepository.save(any(ChallengePurchase.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(mercadoPagoService.createPreference(any(), any(), any(), any()))
+                .thenReturn("http://mock-init-point");
+
+        CreatePurchaseRequest request =
+                new CreatePurchaseRequest("Manuel Robles", "11 2233-4455", "buyer@example.com", null);
+
+        service.createPurchase(request);
+
+        ArgumentCaptor<ChallengePurchase> captor = ArgumentCaptor.forClass(ChallengePurchase.class);
+        verify(challengePurchaseRepository).save(captor.capture());
+        assertThat(captor.getValue().getChallengeMonth()).isEqualTo(3);
+    }
+
+    @Test
+    void createPurchase_phoneAlreadyPaidAllThreeMonths_throwsBadRequestAndPersistsNothing() {
+        ChallengePurchase month1 = purchase("Manuel Robles", ChallengePurchaseStatus.PAID, Instant.now());
+        month1.setChallengeMonth(1);
+        ChallengePurchase month2 = purchase("Manuel Robles", ChallengePurchaseStatus.PAID, Instant.now());
+        month2.setChallengeMonth(2);
+        ChallengePurchase month3 = purchase("Manuel Robles", ChallengePurchaseStatus.PAID, Instant.now());
+        month3.setChallengeMonth(3);
+        when(challengePurchaseRepository.findByPhoneAndActivoTrue("541122334455"))
+                .thenReturn(List.of(month1, month2, month3));
+
+        CreatePurchaseRequest request =
+                new CreatePurchaseRequest("Manuel Robles", "11 2233-4455", "buyer@example.com", null);
+
+        assertThatThrownBy(() -> service.createPurchase(request))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("3 meses");
+
+        verifyNoInteractions(mercadoPagoService);
+        verify(challengePurchaseRepository, never()).save(any());
+    }
+
+    @Test
+    void createPurchase_concurrentRequestsFromSamePhone_neverInterleaveTheCriticalSection()
+            throws Exception {
+        // Proves the per-phone lock actually serializes concurrent same-phone
+        // requests — they never both execute the compute-then-save section at
+        // once. Does NOT prove they end up with different months (they may
+        // not — see the "what this does NOT close" note on createPurchase).
+        AtomicInteger concurrentEntries = new AtomicInteger();
+        AtomicInteger maxConcurrentEntries = new AtomicInteger();
+        when(challengePurchaseRepository.findByPhoneAndActivoTrue("541122334455"))
+                .thenReturn(List.of());
+        when(mercadoPagoService.isConfigured()).thenReturn(true);
+        when(challengePurchaseRepository.save(any(ChallengePurchase.class)))
+                .thenAnswer(invocation -> {
+                    int concurrent = concurrentEntries.incrementAndGet();
+                    maxConcurrentEntries.updateAndGet(max -> Math.max(max, concurrent));
+                    Thread.sleep(50); // widen the window so a real race would actually overlap
+                    concurrentEntries.decrementAndGet();
+                    return invocation.getArgument(0);
+                });
+        when(mercadoPagoService.createPreference(any(), any(), any(), any()))
+                .thenReturn("http://mock-init-point");
+
+        CreatePurchaseRequest request =
+                new CreatePurchaseRequest("Manuel Robles", "11 2233-4455", "buyer@example.com", null);
+
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            List<Future<CreatePurchaseResponse>> futures = pool.invokeAll(
+                    List.of(() -> service.createPurchase(request), () -> service.createPurchase(request)));
+            for (Future<CreatePurchaseResponse> future : futures) {
+                future.get();
+            }
+        } finally {
+            pool.shutdown();
+        }
+
+        assertThat(maxConcurrentEntries.get()).isEqualTo(1);
+    }
+
+    @Test
+    void createPurchase_explicitMonthRequested_skipsAutoAssignEvenIfPhoneHasNoHistory()
+            throws MPException, MPApiException {
+        // An explicit challengeMonth must win outright — no phone lookup at all —
+        // so a future caller that legitimately wants to grant a specific month
+        // (e.g. manual support intervention) isn't second-guessed by history.
+        when(mercadoPagoService.isConfigured()).thenReturn(true);
+        when(challengePurchaseRepository.save(any(ChallengePurchase.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(mercadoPagoService.createPreference(any(), any(), any(), any()))
+                .thenReturn("http://mock-init-point");
+
+        CreatePurchaseRequest request =
+                new CreatePurchaseRequest("Manuel Robles", "11 2233-4455", "buyer@example.com", 2);
+
+        service.createPurchase(request);
+
+        verify(challengePurchaseRepository, never()).findByPhoneAndActivoTrue(any());
     }
 
     @Test
