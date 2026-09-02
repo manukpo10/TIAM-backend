@@ -75,6 +75,37 @@ class ChallengeDayCatalogTest {
         assertThat(ChallengeDayCatalog.dayInfo(2, 4).area()).isEqualTo("calculo");
     }
 
+    // --- month 3: exhaustive literal data check ---------------------------------
+
+    @Test
+    void dayInfo_month3_matchesFinalizedContentPlanForEveryDay() {
+        Map<Integer, String> expectedAreaByDay = Map.ofEntries(
+                Map.entry(1, "lenguaje"), Map.entry(2, "memoria"), Map.entry(3, "calculo"),
+                Map.entry(4, "praxias"), Map.entry(5, "orientacion"), Map.entry(6, "atencion"),
+                Map.entry(7, "ejecutivas"), Map.entry(8, "lenguaje"), Map.entry(9, "memoria"),
+                Map.entry(10, "atencion"), Map.entry(11, "calculo"), Map.entry(12, "praxias"),
+                Map.entry(13, "orientacion"), Map.entry(14, "lenguaje"), Map.entry(15, "ejecutivas"),
+                Map.entry(16, "lenguaje"),
+                // día 17 was "memoria" (Fluencia con recuerdo, a study-then-recall
+                // exercise) until it was redesigned into a pure-selection exercise
+                // with nothing left to remember (Fluencia con reglas) — the frontend
+                // catalog moved it to "atencion" but this backend mirror wasn't
+                // updated at the same time, which silently inflated "memoria" past
+                // 100% on the progress panel (día 22 in month 1 is the same bug,
+                // see that test above — this is the second real occurrence).
+                Map.entry(17, "atencion"),
+                Map.entry(18, "lenguaje"), Map.entry(19, "calculo"), Map.entry(20, "praxias"),
+                Map.entry(21, "atencion"), Map.entry(22, "agnosias"), Map.entry(23, "lenguaje"),
+                Map.entry(24, "memoria"), Map.entry(25, "calculo"), Map.entry(26, "praxias"),
+                Map.entry(27, "atencion"), Map.entry(28, "orientacion"), Map.entry(29, "ejecutivas"),
+                Map.entry(30, "calculo"));
+
+        expectedAreaByDay.forEach((day, expectedArea) ->
+                assertThat(ChallengeDayCatalog.dayInfo(3, day).area())
+                        .as("day %d", day)
+                        .isEqualTo(expectedArea));
+    }
+
     // --- error handling ----------------------------------------------------------
 
     @Test
