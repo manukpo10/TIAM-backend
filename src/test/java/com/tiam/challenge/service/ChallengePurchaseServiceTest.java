@@ -655,7 +655,7 @@ class ChallengePurchaseServiceTest {
     }
 
     @Test
-    void buildWhatsAppReply_matchedDayUnderThirty_includesTomorrowLine() {
+    void buildWhatsAppReply_matchedDayUnderThirty_includesDailyLinkReminder() {
         ChallengePurchase purchase = purchase("Manuel Robles", ChallengePurchaseStatus.PAID,
                 Instant.now().minus(4, ChronoUnit.DAYS));
         when(challengePurchaseRepository.findByPhoneAndActivoTrue("541122334455"))
@@ -667,8 +667,8 @@ class ChallengePurchaseServiceTest {
         assertThat(reply)
                 .contains("Día 5")
                 .contains("http://localhost:5173/desafio/test-access-token")
-                .contains("Día 6")
-                .contains("desafío");
+                .contains("todos los días")
+                .contains("mismo link");
     }
 
     @Test

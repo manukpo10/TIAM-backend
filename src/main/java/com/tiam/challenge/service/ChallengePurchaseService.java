@@ -272,9 +272,10 @@ public class ChallengePurchaseService {
      * number:
      * <ul>
      *   <li>a matching PAID purchase still mid-challenge gets today's exercise
-     *       link plus a reminder to write back tomorrow;</li>
+     *       link plus a note that the same link updates daily — there's no
+     *       per-day token, so re-visiting it tomorrow just works;</li>
      *   <li>a matching PAID purchase on day 30 gets a completion message instead
-     *       of a "come back tomorrow" line;</li>
+     *       of that daily-link note;</li>
      *   <li>no PAID match but a PENDING purchase for the phone gets a
      *       payment-confirmation-in-progress message;</li>
      *   <li>no purchase at all gets a sales-page nudge.</li>
@@ -292,7 +293,7 @@ public class ChallengePurchaseService {
             if (currentDay < TOTAL_DAYS) {
                 return "¡Hola " + firstName + "! 👋 Acá está tu ejercicio del Día " + currentDay + " de " + TOTAL_DAYS + ":\n" + link
                         + "\n\nTocá el link, hacelo con calma (son unos minutos) y listo por hoy. 🌱"
-                        + "\n\n📌 Mañana escribinos \"desafío\" y te paso el Día " + (currentDay + 1) + ".";
+                        + "\n\n📌 Entrá todos los días a este mismo link: te va a aparecer un juego nuevo cada día.";
             }
 
             return "¡Hola " + firstName + "! 👋 Llegaste al Día " + TOTAL_DAYS + " de " + TOTAL_DAYS + ", tu último ejercicio:\n" + link
