@@ -35,7 +35,7 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class ChallengePurchaseService {
 
-    private static final BigDecimal PRICE_ARS = BigDecimal.valueOf(15000);
+    private static final BigDecimal PRICE_ARS = BigDecimal.valueOf(100);
     private static final String ITEM_TITLE = "Desafío 30 días - TIAM Digital";
     private static final ZoneId ZONE = ZoneId.of("America/Argentina/Buenos_Aires");
     private static final int TOTAL_DAYS = 30;
