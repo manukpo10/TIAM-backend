@@ -185,10 +185,22 @@ public class ChallengeDayResultService {
      * current area, not left under whatever the catalog said at play-time.
      * Trusting the stored value let a played-count exceed an area's current
      * total after any rebalance (see ChallengeDayResultServiceTest).
+     *
+     * Also skips any result whose day is CARD-type in the current catalog —
+     * a real production account had a día that was a GAME (área agnosias)
+     * when they played it years... weeks ago, later redesigned into a CARD
+     * day (lápiz y papel, área lenguaje). New completions for CARD days are
+     * already rejected with 400 (see completeDay), but that old row was
+     * never removed, and computeAreaBreakdown re-buckets it under the day's
+     * CURRENT area regardless of type — inflating that area's played count
+     * past gameDayCount()'s denominator, which DOES filter to GAME days.
+     * Filtering here the same way keeps numerator and denominator counting
+     * the same thing.
      */
     private List<ChallengeAreaBreakdownResponse> computeAreaBreakdown(
             List<ChallengeDayResult> results, int challengeMonth) {
         Map<String, List<ChallengeDayResult>> byArea = results.stream()
+                .filter(r -> ChallengeDayCatalog.dayInfo(challengeMonth, r.getDay()).type() == ChallengeDayType.GAME)
                 .collect(Collectors.groupingBy(r -> ChallengeDayCatalog.dayInfo(challengeMonth, r.getDay()).area()));
 
         return ChallengeDayCatalog.AREAS.stream()

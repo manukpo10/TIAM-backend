@@ -326,6 +326,27 @@ class ChallengeDayResultServiceTest {
         assertThat(areaBreakdown(progress, "memoria").played()).isZero(); // not the stale stored one
     }
 
+    @Test
+    void getProgress_areaBreakdown_excludesResultForDayThatIsNowCardType() {
+        // Real production bug: día 14 mes 3 used to be a GAME (área agnosias) —
+        // a purchaser played it back then, so a DayResult row for día 14
+        // exists. It was later redesigned into a CARD day (lápiz y papel,
+        // área lenguaje) — new completions for CARD days are rejected with
+        // 400 (see completeDay), but that old row was never removed. Without
+        // the type filter, computeAreaBreakdown re-bucketed it under día 14's
+        // CURRENT area (lenguaje) same as usesCurrentCatalogAreaNotStaleStoredValue
+        // above — except gameDayCount()'s denominator already excludes CARD
+        // days, so this pushed "lenguaje" to 6 de 5 (120%) on a real account.
+        givenPurchase(Instant.now(), 14, 3);
+        ChallengeDayResult oldCardDayResult = resultForDay(14); // stored area irrelevant — must be excluded outright
+        givenResults(List.of(oldCardDayResult));
+
+        ChallengeProgressResponse progress = service.getProgress(ACCESS_TOKEN);
+
+        assertThat(areaBreakdown(progress, "lenguaje").played()).isZero();
+        assertThat(progress.areaBreakdown()).allSatisfy(a -> assertThat(a.played()).isZero());
+    }
+
     // --- getProgress: month-aware catalog ----------------------------------------
 
     @Test
