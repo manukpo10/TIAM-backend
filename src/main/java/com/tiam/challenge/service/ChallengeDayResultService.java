@@ -130,19 +130,27 @@ public class ChallengeDayResultService {
     }
 
     /**
-     * Walks the catalog from day 1 up to {@code currentDay} — days beyond that
-     * haven't unlocked yet, so they can neither extend nor break the chain (an
-     * unplayed 'card' day past currentDay would otherwise show as a false
-     * "pass-through"). 'card' days are automatic pass-throughs that never break
-     * the chain; a 'game' day only keeps it alive if it has a recorded result.
-     * "current" is the run ending exactly at currentDay: if today's game hasn't
-     * been played yet, current reads 0 until it is.
+     * Walks the catalog from day 1 up to {@code streakWalkBound}, the lower of
+     * {@code currentDay} and the highest day with an actual recorded result —
+     * NOT up to {@code currentDay} alone. Under the weekly-batch unlock model,
+     * {@code currentDay} jumps ahead to the last day of the current batch as
+     * soon as it opens (e.g. to 7 immediately on purchase), well before the
+     * player has actually played that far — walking all the way to
+     * {@code currentDay} would treat every unlocked-but-not-yet-played 'game'
+     * day in the batch as a broken day and incorrectly zero the current streak,
+     * even though those days were never skipped, just not reached yet. 'card'
+     * days are automatic pass-throughs that never break the chain; a 'game' day
+     * only keeps it alive if it has a recorded result. "current" is the run
+     * ending exactly at streakWalkBound: if the most recently reached day's
+     * game hasn't been played yet, current reads 0 until it is.
      */
     private ChallengeStreakResponse computeStreak(
             Map<Integer, ChallengeDayResult> resultsByDay, int currentDay, int challengeMonth) {
+        int highestPlayedDay = resultsByDay.keySet().stream().max(Integer::compareTo).orElse(0);
+        int streakWalkBound = Math.min(currentDay, highestPlayedDay);
         int running = 0;
         int longest = 0;
-        for (int day = 1; day <= currentDay; day++) {
+        for (int day = 1; day <= streakWalkBound; day++) {
             ChallengeDayCatalog.DayInfo dayInfo = ChallengeDayCatalog.dayInfo(challengeMonth, day);
             boolean alive = dayInfo.type() != ChallengeDayType.GAME || resultsByDay.containsKey(day);
             running = alive ? running + 1 : 0;

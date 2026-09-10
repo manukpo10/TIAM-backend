@@ -53,22 +53,73 @@ class ChallengePurchaseServiceTest {
     }
 
     @Test
-    void getAccess_purchasedToday_returnsDay1() {
+    void getAccess_purchasedToday_returnsDay7() {
+        // Weekly-batch unlock: 0 elapsed days still falls in week 1, which
+        // unlocks days 1-7 all at once.
         givenPurchase(purchase("Manuel Robles", ChallengePurchaseStatus.PAID, Instant.now()));
 
         ChallengeAccessResponse response = service.getAccess(ACCESS_TOKEN);
 
-        assertThat(response.currentDay()).isEqualTo(1);
+        assertThat(response.currentDay()).isEqualTo(7);
     }
 
     @Test
-    void getAccess_purchased4DaysAgo_returnsDay5() {
+    void getAccess_purchased4DaysAgo_stillInFirstBatch_returnsDay7() {
+        // 4 elapsed days is still within week 1 (days 0-6), so this lands on
+        // the same day-7 batch boundary as purchasedToday.
         givenPurchase(purchase("Manuel Robles", ChallengePurchaseStatus.PAID,
             Instant.now().minus(4, ChronoUnit.DAYS)));
 
         ChallengeAccessResponse response = service.getAccess(ACCESS_TOKEN);
 
-        assertThat(response.currentDay()).isEqualTo(5);
+        assertThat(response.currentDay()).isEqualTo(7);
+    }
+
+    @Test
+    void getAccess_purchased7DaysAgo_entersSecondBatch_returnsDay14() {
+        // 7 elapsed days crosses into week 2, unlocking through day 14.
+        givenPurchase(purchase("Manuel Robles", ChallengePurchaseStatus.PAID,
+            Instant.now().minus(7, ChronoUnit.DAYS)));
+
+        ChallengeAccessResponse response = service.getAccess(ACCESS_TOKEN);
+
+        assertThat(response.currentDay()).isEqualTo(14);
+    }
+
+    @Test
+    void getAccess_purchased13DaysAgo_stillInSecondBatch_returnsDay14() {
+        // 13 elapsed days is still within week 2 (days 7-13), so this lands
+        // on the same day-14 batch boundary as the 7-days-ago case.
+        givenPurchase(purchase("Manuel Robles", ChallengePurchaseStatus.PAID,
+            Instant.now().minus(13, ChronoUnit.DAYS)));
+
+        ChallengeAccessResponse response = service.getAccess(ACCESS_TOKEN);
+
+        assertThat(response.currentDay()).isEqualTo(14);
+    }
+
+    @Test
+    void getAccess_purchased27DaysAgo_returnsDay28() {
+        // 27 elapsed days is week 4 (weeksElapsed=3), unlocking through day 28.
+        givenPurchase(purchase("Manuel Robles", ChallengePurchaseStatus.PAID,
+            Instant.now().minus(27, ChronoUnit.DAYS)));
+
+        ChallengeAccessResponse response = service.getAccess(ACCESS_TOKEN);
+
+        assertThat(response.currentDay()).isEqualTo(28);
+    }
+
+    @Test
+    void getAccess_purchased28DaysAgo_finalPartialBatchClampsTo30() {
+        // 28 elapsed days is week 5 (weeksElapsed=4), which would unlock
+        // through day 35 — clamped to 30, so the final batch is a partial one
+        // of only 2 days (29, 30).
+        givenPurchase(purchase("Manuel Robles", ChallengePurchaseStatus.PAID,
+            Instant.now().minus(28, ChronoUnit.DAYS)));
+
+        ChallengeAccessResponse response = service.getAccess(ACCESS_TOKEN);
+
+        assertThat(response.currentDay()).isEqualTo(30);
     }
 
     @Test
@@ -655,7 +706,9 @@ class ChallengePurchaseServiceTest {
     }
 
     @Test
-    void buildWhatsAppReply_matchedDayUnderThirty_includesDailyLinkReminder() {
+    void buildWhatsAppReply_matchedDayUnderThirty_includesWeeklyBatchReminder() {
+        // Purchased 4 days ago -> still within week 1's batch, so currentDay
+        // resolves to 7 under the weekly-batch formula (not 5).
         ChallengePurchase purchase = purchase("Manuel Robles", ChallengePurchaseStatus.PAID,
                 Instant.now().minus(4, ChronoUnit.DAYS));
         when(challengePurchaseRepository.findByPhoneAndActivoTrue("541122334455"))
@@ -665,9 +718,9 @@ class ChallengePurchaseServiceTest {
         String reply = service.buildWhatsAppReply("541122334455");
 
         assertThat(reply)
-                .contains("Día 5")
+                .contains("Día 7")
                 .contains("http://localhost:5173/desafio/test-access-token")
-                .contains("todos los días")
+                .contains("cada semana se desbloquean 7 ejercicios nuevos")
                 .contains("mismo link");
     }
 

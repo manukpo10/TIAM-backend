@@ -263,6 +263,24 @@ class ChallengeDayResultServiceTest {
         assertThat(progress.streak().longest()).isEqualTo(3); // ties the day1-3 run
     }
 
+    @Test
+    void getProgress_unlockedButUnplayedDaysWithinBatch_doNotBreakCurrentStreak() {
+        // Under the weekly-batch unlock model, currentDay jumps ahead to the end
+        // of the unlocked batch (7) immediately, even though the player has only
+        // actually reached days 1-3 so far. Before the streakWalkBound fix, the
+        // walk continued past day 3 up to currentDay=7, treated days 4-7 (GAME,
+        // no result) as breaks, and zeroed the current streak — even though
+        // those days were never skipped, just not reached yet. This is exactly
+        // the bug the streakWalkBound fix closes.
+        givenPurchase(Instant.now(), 7);
+        givenResults(List.of(resultForDay(1), resultForDay(2), resultForDay(3)));
+
+        ChallengeProgressResponse progress = service.getProgress(ACCESS_TOKEN);
+
+        assertThat(progress.streak().current()).isEqualTo(3);
+        assertThat(progress.streak().longest()).isEqualTo(3);
+    }
+
     // --- getProgress: badges ---------------------------------------------------------
 
     @Test
@@ -369,12 +387,19 @@ class ChallengeDayResultServiceTest {
         // month parameter is correctly threaded through computeStreak's catalog
         // lookups for every day 1..30, not just the one day under test elsewhere —
         // an unthreaded month would throw "Unknown challenge day" via the wrong catalog.
+        // A result at day 30 makes highestPlayedDay 30 too, so streakWalkBound is
+        // 30 and the walk actually reaches every catalog day instead of stopping
+        // vacuously at bound 0 (an empty results list would never call dayInfo at
+        // all). Days 1-29 are all GAME with no recorded result (month 2 has no
+        // CARD days), so they reset the run each time; day 30 has a result, so
+        // current/longest both land on 1.
         givenPurchase(Instant.now().minusSeconds(40L * 86_400), 30, 2);
-        givenResults(List.of());
+        givenResults(List.of(resultForDay(30)));
 
         ChallengeProgressResponse progress = service.getProgress(ACCESS_TOKEN);
 
-        assertThat(progress.streak().current()).isZero();
+        assertThat(progress.streak().current()).isEqualTo(1);
+        assertThat(progress.streak().longest()).isEqualTo(1);
     }
 
     @Test

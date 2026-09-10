@@ -223,7 +223,9 @@ public class ChallengePurchaseService {
         LocalDate purchaseDay = purchaseDate.atZone(ZONE).toLocalDate();
         LocalDate today = LocalDate.now(ZONE);
         long elapsed = ChronoUnit.DAYS.between(purchaseDay, today);
-        return (int) Math.max(1, Math.min(TOTAL_DAYS, elapsed + 1));
+        long weeksElapsed = Math.floorDiv(elapsed, 7L);
+        long unlockedThroughBatch = (weeksElapsed + 1) * 7;
+        return (int) Math.max(1, Math.min(TOTAL_DAYS, unlockedThroughBatch));
     }
 
     private String firstName(String buyerName) {
@@ -272,10 +274,11 @@ public class ChallengePurchaseService {
      * number:
      * <ul>
      *   <li>a matching PAID purchase still mid-challenge gets today's exercise
-     *       link plus a note that the same link updates daily — there's no
-     *       per-day token, so re-visiting it tomorrow just works;</li>
+     *       link plus a note that the same link unlocks a new batch of 7
+     *       exercises every week — there's no per-day token, so re-visiting it
+     *       once the next batch opens just works;</li>
      *   <li>a matching PAID purchase on day 30 gets a completion message instead
-     *       of that daily-link note;</li>
+     *       of that weekly-batch note;</li>
      *   <li>no PAID match but a PENDING purchase for the phone gets a
      *       payment-confirmation-in-progress message;</li>
      *   <li>no purchase at all gets a sales-page nudge.</li>
@@ -293,7 +296,7 @@ public class ChallengePurchaseService {
             if (currentDay < TOTAL_DAYS) {
                 return "¡Hola " + firstName + "! 👋 Acá está tu ejercicio del Día " + currentDay + " de " + TOTAL_DAYS + ":\n" + link
                         + "\n\nTocá el link, hacelo con calma (son unos minutos) y listo por hoy. 🌱"
-                        + "\n\n📌 Entrá todos los días a este mismo link: te va a aparecer un juego nuevo cada día.";
+                        + "\n\n📌 Entrá cuando quieras a este mismo link: cada semana se desbloquean 7 ejercicios nuevos.";
             }
 
             return "¡Hola " + firstName + "! 👋 Llegaste al Día " + TOTAL_DAYS + " de " + TOTAL_DAYS + ", tu último ejercicio:\n" + link
