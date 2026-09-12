@@ -141,6 +141,47 @@ public final class ChallengeDayCatalog {
             Map.entry(29, new DayInfo(ChallengeDayType.GAME, "ejecutivas")),
             Map.entry(30, new DayInfo(ChallengeDayType.GAME, "calculo")));
 
+    /**
+     * "Mes 4" — independent catalog. All 30 days are GAME type (no CARD days,
+     * unlike month 3).
+     *
+     * The full 30 days are declared here from the start even though month 4's
+     * games ship in weekly batches of 7: the frontend gates which days are
+     * visible, but any day that ever reaches {@link #dayInfo} must resolve, and
+     * a partially-filled map would throw instead.
+     */
+    private static final Map<Integer, DayInfo> DAYS_MONTH_4 = Map.ofEntries(
+            Map.entry(1, new DayInfo(ChallengeDayType.GAME, "lenguaje")),
+            Map.entry(2, new DayInfo(ChallengeDayType.GAME, "memoria")),
+            Map.entry(3, new DayInfo(ChallengeDayType.GAME, "calculo")),
+            Map.entry(4, new DayInfo(ChallengeDayType.GAME, "praxias")),
+            Map.entry(5, new DayInfo(ChallengeDayType.GAME, "atencion")),
+            Map.entry(6, new DayInfo(ChallengeDayType.GAME, "ejecutivas")),
+            Map.entry(7, new DayInfo(ChallengeDayType.GAME, "lenguaje")),
+            Map.entry(8, new DayInfo(ChallengeDayType.GAME, "calculo")),
+            Map.entry(9, new DayInfo(ChallengeDayType.GAME, "memoria")),
+            Map.entry(10, new DayInfo(ChallengeDayType.GAME, "lenguaje")),
+            Map.entry(11, new DayInfo(ChallengeDayType.GAME, "calculo")),
+            Map.entry(12, new DayInfo(ChallengeDayType.GAME, "orientacion")),
+            Map.entry(13, new DayInfo(ChallengeDayType.GAME, "lenguaje")),
+            Map.entry(14, new DayInfo(ChallengeDayType.GAME, "atencion")),
+            Map.entry(15, new DayInfo(ChallengeDayType.GAME, "memoria")),
+            Map.entry(16, new DayInfo(ChallengeDayType.GAME, "ejecutivas")),
+            Map.entry(17, new DayInfo(ChallengeDayType.GAME, "calculo")),
+            Map.entry(18, new DayInfo(ChallengeDayType.GAME, "praxias")),
+            Map.entry(19, new DayInfo(ChallengeDayType.GAME, "lenguaje")),
+            Map.entry(20, new DayInfo(ChallengeDayType.GAME, "calculo")),
+            Map.entry(21, new DayInfo(ChallengeDayType.GAME, "agnosias")),
+            Map.entry(22, new DayInfo(ChallengeDayType.GAME, "ejecutivas")),
+            Map.entry(23, new DayInfo(ChallengeDayType.GAME, "atencion")),
+            Map.entry(24, new DayInfo(ChallengeDayType.GAME, "lenguaje")),
+            Map.entry(25, new DayInfo(ChallengeDayType.GAME, "calculo")),
+            Map.entry(26, new DayInfo(ChallengeDayType.GAME, "agnosias")),
+            Map.entry(27, new DayInfo(ChallengeDayType.GAME, "orientacion")),
+            Map.entry(28, new DayInfo(ChallengeDayType.GAME, "memoria")),
+            Map.entry(29, new DayInfo(ChallengeDayType.GAME, "orientacion")),
+            Map.entry(30, new DayInfo(ChallengeDayType.GAME, "calculo")));
+
     public static final int TOTAL_DAYS = DAYS_MONTH_1.size();
 
     /** How many of this month's 30 days are actually completable games — see class doc. */
@@ -172,6 +213,7 @@ public final class ChallengeDayCatalog {
             case 1 -> DAYS_MONTH_1;
             case 2 -> DAYS_MONTH_2;
             case 3 -> DAYS_MONTH_3;
+            case 4 -> DAYS_MONTH_4;
             default -> throw new IllegalArgumentException("Unknown challenge month: " + challengeMonth);
         };
     }

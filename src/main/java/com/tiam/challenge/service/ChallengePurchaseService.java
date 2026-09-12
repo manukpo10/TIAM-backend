@@ -39,6 +39,17 @@ public class ChallengePurchaseService {
     private static final String ITEM_TITLE = "Desafío 30 días - TIAM Digital";
     private static final ZoneId ZONE = ZoneId.of("America/Argentina/Buenos_Aires");
     private static final int TOTAL_DAYS = 30;
+    /**
+     * How many months are on sale — the ceiling for both the explicit-month
+     * allowlist and {@link #nextUnpaidMonth}'s auto-assignment.
+     *
+     * <p>Deliberately NOT the same as how many catalogs exist:
+     * {@code ChallengeDayCatalog} already carries a month 4, but its games ship
+     * in weekly batches of 7 and only the first batch is built. Selling it now
+     * would strand a buyer on an empty day 8 a week in. Bump this to 4 once
+     * enough batches have landed.
+     */
+    private static final int MONTHS_ON_SALE = 3;
 
     private final ChallengePurchaseRepository challengePurchaseRepository;
     private final MercadoPagoService mercadoPagoService;
@@ -61,11 +72,10 @@ public class ChallengePurchaseService {
     @Transactional
     public CreatePurchaseResponse createPurchase(CreatePurchaseRequest request) {
         Integer requestedMonth = request.challengeMonth();
-        if (requestedMonth != null && requestedMonth != 1 && requestedMonth != 2 && requestedMonth != 3) {
-            // Small allowlist check, not a generic range validator — only months 1-3
-            // exist today. Checked before isConfigured()/persistence so a bad
-            // value fails fast with a clean 400 instead of a 500 later when the
-            // day-catalog lookup rejects it at play time.
+        if (requestedMonth != null && (requestedMonth < 1 || requestedMonth > MONTHS_ON_SALE)) {
+            // Checked before isConfigured()/persistence so a bad value fails fast
+            // with a clean 400 instead of a 500 later when the day-catalog lookup
+            // rejects it at play time.
             throw new BadRequestException("Unsupported challenge month: " + requestedMonth);
         }
 
@@ -138,9 +148,9 @@ public class ChallengePurchaseService {
      * for — first-time buyers get 1, a phone that already has month 1 PAID
      * gets 2, and so on. Only PAID rows count: an abandoned PENDING checkout
      * or a FAILED payment for a month doesn't block buying that same month
-     * again. Throws if all 3 are already PAID — there's no month 4 to fall
-     * back to, and silently reassigning an already-owned month would charge
-     * the buyer again for nothing new.
+     * again. Throws once every month is already PAID — there's no further month
+     * to fall back to, and silently reassigning an already-owned month would
+     * charge the buyer again for nothing new.
      *
      * <p>Only ever called from inside {@link #createPurchase}'s per-phone
      * {@code synchronized} block — calling it unguarded would reopen the
@@ -148,13 +158,13 @@ public class ChallengePurchaseService {
      */
     private int nextUnpaidMonth(String rawPhone) {
         Set<Integer> paidMonths = paidMonthsFor(rawPhone);
-        for (int month = 1; month <= 3; month++) {
+        for (int month = 1; month <= MONTHS_ON_SALE; month++) {
             if (!paidMonths.contains(month)) {
                 return month;
             }
         }
         throw new BadRequestException(
-                "Ya tenés los 3 meses del Desafío activados — no queda ningún mes nuevo para comprar.");
+                "Ya tenés los " + MONTHS_ON_SALE + " meses del Desafío activados — no queda ningún mes nuevo para comprar.");
     }
 
     private Set<Integer> paidMonthsFor(String rawPhone) {

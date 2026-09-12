@@ -344,7 +344,7 @@ class ChallengePurchaseServiceTest {
     }
 
     @Test
-    void createPurchase_unsupportedMonthAboveThree_throwsBadRequestAndPersistsNothing() {
+    void createPurchase_unsupportedMonthAboveTheLast_throwsBadRequestAndPersistsNothing() {
         // Validation must short-circuit before isConfigured()/persistence/MP — no
         // stub for mercadoPagoService.isConfigured() here on purpose: reaching it
         // for real (not as a stub setup) would fail verifyNoInteractions below.
@@ -352,8 +352,9 @@ class ChallengePurchaseServiceTest {
         // the pre-existing "MP not configured" guard also throws a bare
         // BadRequestException, and with isConfigured() unstubbed (defaults to
         // false) that guard would produce a false-green for the wrong reason if
-        // this test only checked isInstanceOf. Uses 4, not 3 — month 3 is a real,
-        // supported catalog now (see the createPurchase_month3* tests below).
+        // Probes 4: a month 4 CATALOG exists now, but only its first weekly
+        // batch of games is built, so it is deliberately not on sale yet —
+        // MONTHS_ON_SALE still caps at 3. Move this to 5 when month 4 opens.
         CreatePurchaseRequest request =
                 new CreatePurchaseRequest("Manuel Robles", "11 2233-4455", "buyer@example.com", 4);
 
@@ -477,7 +478,10 @@ class ChallengePurchaseServiceTest {
     }
 
     @Test
-    void createPurchase_phoneAlreadyPaidAllThreeMonths_throwsBadRequestAndPersistsNothing() {
+    void createPurchase_phoneAlreadyPaidEveryMonthOnSale_throwsBadRequestAndPersistsNothing() {
+        // Months on sale still cap at 3 — month 4's catalog exists but only its
+        // first weekly batch of games is built, so auto-assignment must refuse
+        // rather than hand the buyer a month that runs out on day 8.
         ChallengePurchase month1 = purchase("Manuel Robles", ChallengePurchaseStatus.PAID, Instant.now());
         month1.setChallengeMonth(1);
         ChallengePurchase month2 = purchase("Manuel Robles", ChallengePurchaseStatus.PAID, Instant.now());

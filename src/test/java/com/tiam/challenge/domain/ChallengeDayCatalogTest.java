@@ -106,6 +106,28 @@ class ChallengeDayCatalogTest {
                         .isEqualTo(expectedArea));
     }
 
+    // --- month 4: exhaustive literal data check ---------------------------------
+
+    @Test
+    void dayInfo_month4_matchesFinalizedContentPlanForEveryDay() {
+        Map<Integer, String> expectedAreaByDay = Map.ofEntries(
+                Map.entry(1, "lenguaje"), Map.entry(2, "memoria"), Map.entry(3, "calculo"),
+                Map.entry(4, "praxias"), Map.entry(5, "atencion"), Map.entry(6, "ejecutivas"),
+                Map.entry(7, "lenguaje"), Map.entry(8, "calculo"), Map.entry(9, "memoria"),
+                Map.entry(10, "lenguaje"), Map.entry(11, "calculo"), Map.entry(12, "orientacion"),
+                Map.entry(13, "lenguaje"), Map.entry(14, "atencion"), Map.entry(15, "memoria"),
+                Map.entry(16, "ejecutivas"), Map.entry(17, "calculo"), Map.entry(18, "praxias"),
+                Map.entry(19, "lenguaje"), Map.entry(20, "calculo"), Map.entry(21, "agnosias"),
+                Map.entry(22, "ejecutivas"), Map.entry(23, "atencion"), Map.entry(24, "lenguaje"),
+                Map.entry(25, "calculo"), Map.entry(26, "agnosias"), Map.entry(27, "orientacion"),
+                Map.entry(28, "memoria"), Map.entry(29, "orientacion"), Map.entry(30, "calculo"));
+
+        expectedAreaByDay.forEach((day, expectedArea) ->
+                assertThat(ChallengeDayCatalog.dayInfo(4, day).area())
+                        .as("day %d", day)
+                        .isEqualTo(expectedArea));
+    }
+
     // --- error handling ----------------------------------------------------------
 
     @Test
@@ -118,10 +140,9 @@ class ChallengeDayCatalogTest {
 
     @Test
     void dayInfo_unknownMonth_throws() {
-        // Month 3 used to be unsupported when this test was written; it's a real
-        // catalog now (see DAYS_MONTH_3), so asserting against it here would be
-        // asserting the wrong thing — month 4 is the genuinely unknown one today.
-        assertThatThrownBy(() -> ChallengeDayCatalog.dayInfo(4, 1))
+        // This probe moves up every time a month ships: it was 3, then 4, and
+        // months 1-4 are all real catalogs now — 5 is the genuinely unknown one.
+        assertThatThrownBy(() -> ChallengeDayCatalog.dayInfo(5, 1))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -139,5 +160,7 @@ class ChallengeDayCatalogTest {
         assertThat(ChallengeDayCatalog.gameDayCount(3)).isEqualTo(28);
         assertThat(ChallengeDayCatalog.dayInfo(3, 14).type()).isEqualTo(ChallengeDayType.CARD);
         assertThat(ChallengeDayCatalog.dayInfo(3, 28).type()).isEqualTo(ChallengeDayType.CARD);
+        // Month 4 went back to all-GAME days.
+        assertThat(ChallengeDayCatalog.gameDayCount(4)).isEqualTo(30);
     }
 }
