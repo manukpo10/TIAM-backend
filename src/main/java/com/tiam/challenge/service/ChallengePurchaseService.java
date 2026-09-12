@@ -43,13 +43,13 @@ public class ChallengePurchaseService {
      * How many months are on sale — the ceiling for both the explicit-month
      * allowlist and {@link #nextUnpaidMonth}'s auto-assignment.
      *
-     * <p>Deliberately NOT the same as how many catalogs exist:
-     * {@code ChallengeDayCatalog} already carries a month 4, but its games ship
-     * in weekly batches of 7 and only the first batch is built. Selling it now
-     * would strand a buyer on an empty day 8 a week in. Bump this to 4 once
-     * enough batches have landed.
+     * <p>Kept separate from how many catalogs {@code ChallengeDayCatalog}
+     * declares: a month's 30 days land over several commits, and until every
+     * one of them is playable, selling it would strand a buyer on an empty day.
+     * Month 4 is complete, so the two numbers happen to agree again — they are
+     * still two different questions.
      */
-    private static final int MONTHS_ON_SALE = 3;
+    private static final int MONTHS_ON_SALE = 4;
 
     private final ChallengePurchaseRepository challengePurchaseRepository;
     private final MercadoPagoService mercadoPagoService;
