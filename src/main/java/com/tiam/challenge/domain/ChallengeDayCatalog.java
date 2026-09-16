@@ -168,7 +168,11 @@ public final class ChallengeDayCatalog {
             Map.entry(15, new DayInfo(ChallengeDayType.GAME, "memoria")),
             Map.entry(16, new DayInfo(ChallengeDayType.GAME, "ejecutivas")),
             Map.entry(17, new DayInfo(ChallengeDayType.GAME, "calculo")),
-            Map.entry(18, new DayInfo(ChallengeDayType.GAME, "praxias")),
+            // Was praxias. The game that ended up on this day is an
+            // odd-one-out sheet, which is attention, and no visuospatial game
+            // was available to keep the slot honest — so month 4 has one
+            // praxias day (día 4) instead of two.
+            Map.entry(18, new DayInfo(ChallengeDayType.GAME, "atencion")),
             Map.entry(19, new DayInfo(ChallengeDayType.GAME, "lenguaje")),
             Map.entry(20, new DayInfo(ChallengeDayType.GAME, "calculo")),
             Map.entry(21, new DayInfo(ChallengeDayType.GAME, "agnosias")),
