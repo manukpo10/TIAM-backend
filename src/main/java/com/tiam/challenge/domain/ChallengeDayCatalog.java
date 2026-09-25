@@ -186,7 +186,10 @@ public final class ChallengeDayCatalog {
             // vocabulary — same área as día 22's family-tree puzzle.
             Map.entry(24, new DayInfo(ChallengeDayType.GAME, "ejecutivas")),
             Map.entry(25, new DayInfo(ChallengeDayType.GAME, "calculo")),
-            Map.entry(26, new DayInfo(ChallengeDayType.GAME, "agnosias")),
+            // Was agnosias ("Caras y emociones") — the only agnosias day in
+            // month 4. Replaced by a reasoning/deduction puzzle (a zebra-
+            // puzzle-style logic grid), same área as días 22 and 24.
+            Map.entry(26, new DayInfo(ChallengeDayType.GAME, "ejecutivas")),
             Map.entry(27, new DayInfo(ChallengeDayType.GAME, "orientacion")),
             Map.entry(28, new DayInfo(ChallengeDayType.GAME, "memoria")),
             Map.entry(29, new DayInfo(ChallengeDayType.GAME, "orientacion")),
