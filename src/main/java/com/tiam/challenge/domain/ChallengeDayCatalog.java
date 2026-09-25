@@ -181,7 +181,10 @@ public final class ChallengeDayCatalog {
             Map.entry(21, new DayInfo(ChallengeDayType.GAME, "calculo")),
             Map.entry(22, new DayInfo(ChallengeDayType.GAME, "ejecutivas")),
             Map.entry(23, new DayInfo(ChallengeDayType.GAME, "atencion")),
-            Map.entry(24, new DayInfo(ChallengeDayType.GAME, "lenguaje")),
+            // Was lenguaje ("¿Cómo se llamaba?"). The replacement is a
+            // transporte+destino deduction puzzle from clues — reasoning, not
+            // vocabulary — same área as día 22's family-tree puzzle.
+            Map.entry(24, new DayInfo(ChallengeDayType.GAME, "ejecutivas")),
             Map.entry(25, new DayInfo(ChallengeDayType.GAME, "calculo")),
             Map.entry(26, new DayInfo(ChallengeDayType.GAME, "agnosias")),
             Map.entry(27, new DayInfo(ChallengeDayType.GAME, "orientacion")),

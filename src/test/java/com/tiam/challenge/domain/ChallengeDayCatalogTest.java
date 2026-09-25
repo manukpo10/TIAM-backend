@@ -118,7 +118,7 @@ class ChallengeDayCatalogTest {
                 Map.entry(13, "lenguaje"), Map.entry(14, "atencion"), Map.entry(15, "memoria"),
                 Map.entry(16, "ejecutivas"), Map.entry(17, "calculo"), Map.entry(18, "atencion"),
                 Map.entry(19, "lenguaje"), Map.entry(20, "calculo"), Map.entry(21, "calculo"),
-                Map.entry(22, "ejecutivas"), Map.entry(23, "atencion"), Map.entry(24, "lenguaje"),
+                Map.entry(22, "ejecutivas"), Map.entry(23, "atencion"), Map.entry(24, "ejecutivas"),
                 Map.entry(25, "calculo"), Map.entry(26, "agnosias"), Map.entry(27, "orientacion"),
                 Map.entry(28, "memoria"), Map.entry(29, "orientacion"), Map.entry(30, "calculo"));
 
