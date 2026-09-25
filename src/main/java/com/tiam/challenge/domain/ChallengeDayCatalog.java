@@ -168,11 +168,14 @@ public final class ChallengeDayCatalog {
             Map.entry(15, new DayInfo(ChallengeDayType.GAME, "memoria")),
             Map.entry(16, new DayInfo(ChallengeDayType.GAME, "ejecutivas")),
             Map.entry(17, new DayInfo(ChallengeDayType.GAME, "calculo")),
-            // Was praxias. The game that ended up on this day is an
-            // odd-one-out sheet, which is attention, and no visuospatial game
-            // was available to keep the slot honest — so month 4 has one
-            // praxias day (día 4) instead of two.
-            Map.entry(18, new DayInfo(ChallengeDayType.GAME, "atencion")),
+            // Was praxias. The exercise that ended up on this day is attention
+            // (excluir-una-letra / excluir-una-propiedad fluency), and no
+            // visuospatial game was available to keep the slot honest — so
+            // month 4 has one praxias day (día 4) instead of two. Lápiz y
+            // papel, CARD type: 6 open-ended prompts, nothing to tap or
+            // validate — same reasoning as month 3's día 14 (see its comment
+            // there).
+            Map.entry(18, new DayInfo(ChallengeDayType.CARD, "atencion")),
             Map.entry(19, new DayInfo(ChallengeDayType.GAME, "lenguaje")),
             Map.entry(20, new DayInfo(ChallengeDayType.GAME, "calculo")),
             Map.entry(21, new DayInfo(ChallengeDayType.GAME, "calculo")),
