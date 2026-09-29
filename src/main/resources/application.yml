@@ -70,6 +70,10 @@ tiam:
     notification-url: ${MP_NOTIFICATION_URL:}
   challenge:
     back-url: ${CHALLENGE_BACK_URL:http://localhost:5173/desafio-30-dias/exito}
+    # Shared secret for POST /challenge/admin/grants (manual access grants for
+    # buyers who paid outside Mercado Pago) — see ChallengePurchaseController.
+    # Unset in dev on purpose: the endpoint fails closed with no secret configured.
+    admin-grant-secret: ${CHALLENGE_ADMIN_GRANT_SECRET:}
     reconciliation:
       # Safety net for lost webhook notifications — see ChallengePurchaseReconciliationService.
       enabled: ${CHALLENGE_RECONCILIATION_ENABLED:true}

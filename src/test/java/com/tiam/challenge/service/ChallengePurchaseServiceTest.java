@@ -5,6 +5,8 @@ import com.mercadopago.exceptions.MPException;
 import com.tiam.challenge.config.WhatsAppProperties;
 import com.tiam.challenge.domain.ChallengePurchase;
 import com.tiam.challenge.domain.ChallengePurchaseStatus;
+import com.tiam.challenge.dto.AdminGrantPurchaseRequest;
+import com.tiam.challenge.dto.AdminGrantPurchaseResponse;
 import com.tiam.challenge.dto.ChallengeAccessResponse;
 import com.tiam.challenge.dto.CreatePurchaseRequest;
 import com.tiam.challenge.dto.CreatePurchaseResponse;
@@ -616,6 +618,123 @@ class ChallengePurchaseServiceTest {
                 .hasMessageContaining("challenge month");
 
         verifyNoInteractions(challengePurchaseRepository, mercadoPagoService);
+    }
+
+    // --- grantManualPurchase --------------------------------------------------
+
+    @Test
+    void grantManualPurchase_newPhone_savesAsPaidWithPurchaseDateSetNow() {
+        when(challengePurchaseRepository.findByPhoneAndActivoTrue("541122334455"))
+                .thenReturn(List.of());
+        when(challengePurchaseRepository.save(any(ChallengePurchase.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        AdminGrantPurchaseRequest request =
+                new AdminGrantPurchaseRequest("Amelia", "11 2233-4455", null, 1);
+
+        service.grantManualPurchase(request);
+
+        ArgumentCaptor<ChallengePurchase> captor = ArgumentCaptor.forClass(ChallengePurchase.class);
+        verify(challengePurchaseRepository).save(captor.capture());
+        ChallengePurchase saved = captor.getValue();
+        assertThat(saved.getStatus()).isEqualTo(ChallengePurchaseStatus.PAID);
+        assertThat(saved.getPurchaseDate()).isNotNull();
+        assertThat(saved.getChallengeMonth()).isEqualTo(1);
+        assertThat(saved.getPhone()).isEqualTo("541122334455");
+        assertThat(saved.getBuyerName()).isEqualTo("Amelia");
+        assertThat(saved.getAccessToken()).isNotBlank();
+        // No real Mercado Pago transaction exists behind a manual grant — a
+        // fabricated id here would misrepresent that.
+        assertThat(saved.getMpPaymentId()).isNull();
+    }
+
+    @Test
+    void grantManualPurchase_returnsPlayLinkBuiltFromAccessToken() {
+        when(challengePurchaseRepository.findByPhoneAndActivoTrue("541122334455"))
+                .thenReturn(List.of());
+        when(challengePurchaseRepository.save(any(ChallengePurchase.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(whatsAppProperties.getDesafioPlayBaseUrl()).thenReturn("http://localhost:5173/desafio");
+
+        AdminGrantPurchaseRequest request =
+                new AdminGrantPurchaseRequest("Amelia", "11 2233-4455", null, 1);
+
+        AdminGrantPurchaseResponse response = service.grantManualPurchase(request);
+
+        assertThat(response.playLink()).isEqualTo("http://localhost:5173/desafio/" + response.accessToken());
+        assertThat(response.buyerName()).isEqualTo("Amelia");
+        assertThat(response.challengeMonth()).isEqualTo(1);
+    }
+
+    @Test
+    void grantManualPurchase_phoneAlreadyPaidForThatMonth_returnsExistingLinkWithoutSavingAgain() {
+        // Idempotency: retrying after an uncertain result (e.g. a dropped
+        // connection) must not double-grant or overwrite the buyer's original
+        // access token.
+        ChallengePurchase existing = purchase("Amelia", ChallengePurchaseStatus.PAID, Instant.now());
+        existing.setChallengeMonth(1);
+        when(challengePurchaseRepository.findByPhoneAndActivoTrue("541122334455"))
+                .thenReturn(List.of(existing));
+        when(whatsAppProperties.getDesafioPlayBaseUrl()).thenReturn("http://localhost:5173/desafio");
+
+        AdminGrantPurchaseRequest request =
+                new AdminGrantPurchaseRequest("Amelia", "11 2233-4455", null, 1);
+
+        AdminGrantPurchaseResponse response = service.grantManualPurchase(request);
+
+        assertThat(response.accessToken()).isEqualTo(ACCESS_TOKEN);
+        verify(challengePurchaseRepository, never()).save(any());
+    }
+
+    @Test
+    void grantManualPurchase_phonePaidForADifferentMonth_stillGrantsTheRequestedOne() {
+        // Owning month 1 already must not block granting month 2 — only an
+        // exact (phone, month) match is idempotent.
+        ChallengePurchase month1 = purchase("Amelia", ChallengePurchaseStatus.PAID, Instant.now());
+        month1.setChallengeMonth(1);
+        when(challengePurchaseRepository.findByPhoneAndActivoTrue("541122334455"))
+                .thenReturn(List.of(month1));
+        when(challengePurchaseRepository.save(any(ChallengePurchase.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        AdminGrantPurchaseRequest request =
+                new AdminGrantPurchaseRequest("Amelia", "11 2233-4455", null, 2);
+
+        service.grantManualPurchase(request);
+
+        verify(challengePurchaseRepository).save(any(ChallengePurchase.class));
+    }
+
+    @Test
+    void grantManualPurchase_unsupportedMonth_throwsBadRequestAndPersistsNothing() {
+        AdminGrantPurchaseRequest request =
+                new AdminGrantPurchaseRequest("Amelia", "11 2233-4455", null, 5);
+
+        assertThatThrownBy(() -> service.grantManualPurchase(request))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("challenge month");
+
+        verify(challengePurchaseRepository, never()).save(any());
+    }
+
+    @Test
+    void grantManualPurchase_normalizesPhoneBeforeSaving() {
+        when(challengePurchaseRepository.findByPhoneAndActivoTrue("541122334455"))
+                .thenReturn(List.of());
+        when(challengePurchaseRepository.save(any(ChallengePurchase.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        AdminGrantPurchaseRequest request =
+                new AdminGrantPurchaseRequest("Amelia", "11 2233-4455", null, 1);
+
+        service.grantManualPurchase(request);
+
+        // The idempotency lookup and the saved row must key off the SAME
+        // normalized phone, or a re-grant could silently create a duplicate.
+        verify(challengePurchaseRepository).findByPhoneAndActivoTrue("541122334455");
+        ArgumentCaptor<ChallengePurchase> captor = ArgumentCaptor.forClass(ChallengePurchase.class);
+        verify(challengePurchaseRepository).save(captor.capture());
+        assertThat(captor.getValue().getPhone()).isEqualTo("541122334455");
     }
 
     @Test

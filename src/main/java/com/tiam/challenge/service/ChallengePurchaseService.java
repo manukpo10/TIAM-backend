@@ -5,6 +5,8 @@ import com.mercadopago.exceptions.MPException;
 import com.tiam.challenge.config.WhatsAppProperties;
 import com.tiam.challenge.domain.ChallengePurchase;
 import com.tiam.challenge.domain.ChallengePurchaseStatus;
+import com.tiam.challenge.dto.AdminGrantPurchaseRequest;
+import com.tiam.challenge.dto.AdminGrantPurchaseResponse;
 import com.tiam.challenge.dto.ChallengeAccessResponse;
 import com.tiam.challenge.dto.CreatePurchaseRequest;
 import com.tiam.challenge.dto.CreatePurchaseResponse;
@@ -141,6 +143,67 @@ public class ChallengePurchaseService {
                     purchase.getId(), e.getMessage(), e);
             throw new BadRequestException("Could not start checkout: " + e.getMessage());
         }
+    }
+
+    /**
+     * Grants a challenge month directly as PAID, with no Mercado Pago
+     * transaction behind it — for a buyer who paid through another channel
+     * (transferencia, efectivo) and needs their access link handed over by
+     * hand instead of through the checkout flow. Mirrors what {@link #markPaid}
+     * does to a pending purchase once MP confirms it, minus the MP side:
+     * same PAID status, same {@code purchaseDate}-starts-now day-unlock
+     * math, same access-token shape — so a manually granted buyer's
+     * experience is indistinguishable from a normal one from here on.
+     * {@code mpPaymentId} stays null on purpose: inventing a fake value
+     * would misrepresent that no real MP transaction exists.
+     *
+     * <p>Idempotent per (phone, month): re-running this for a buyer who
+     * already has that month PAID returns their existing link instead of
+     * creating a second row, so retrying after an uncertain result (e.g. a
+     * dropped connection) can't double-grant.
+     *
+     * <p>Caller (the controller) is responsible for authenticating the
+     * request — this method trusts that whoever invoked it already checked
+     * that.
+     */
+    @Transactional
+    public AdminGrantPurchaseResponse grantManualPurchase(AdminGrantPurchaseRequest request) {
+        if (request.challengeMonth() > MONTHS_ON_SALE) {
+            throw new BadRequestException("Unsupported challenge month: " + request.challengeMonth());
+        }
+
+        String normalizedPhone = PhoneNumberUtil.normalize(request.phone());
+        Optional<ChallengePurchase> existing = challengePurchaseRepository.findByPhoneAndActivoTrue(normalizedPhone)
+                .stream()
+                .filter(p -> p.getStatus() == ChallengePurchaseStatus.PAID
+                        && p.getChallengeMonth().equals(request.challengeMonth()))
+                .findFirst();
+        if (existing.isPresent()) {
+            log.info("Manual grant for phone={} month={} already existed (purchase id={}) — returning it as-is",
+                    normalizedPhone, request.challengeMonth(), existing.get().getId());
+            return toGrantResponse(existing.get());
+        }
+
+        ChallengePurchase purchase = new ChallengePurchase();
+        purchase.setBuyerName(request.buyerName());
+        purchase.setPhone(normalizedPhone);
+        purchase.setEmail(request.email());
+        purchase.setStatus(ChallengePurchaseStatus.PAID);
+        purchase.setAccessToken(UUID.randomUUID().toString());
+        purchase.setChallengeMonth(request.challengeMonth());
+        purchase.setPurchaseDate(Instant.now());
+        purchase = challengePurchaseRepository.save(purchase);
+
+        log.info("Manually granted challenge month={} to phone={} (buyer={}, purchase id={})",
+                request.challengeMonth(), normalizedPhone, request.buyerName(), purchase.getId());
+
+        return toGrantResponse(purchase);
+    }
+
+    private AdminGrantPurchaseResponse toGrantResponse(ChallengePurchase purchase) {
+        String link = whatsAppProperties.getDesafioPlayBaseUrl() + "/" + purchase.getAccessToken();
+        return new AdminGrantPurchaseResponse(
+                purchase.getAccessToken(), link, purchase.getBuyerName(), purchase.getChallengeMonth());
     }
 
     /**
