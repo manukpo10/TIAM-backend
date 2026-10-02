@@ -13,9 +13,13 @@ import jakarta.validation.constraints.NotNull;
  *
  * <p>The upper bound on {@code challengeMonth} is deliberately NOT
  * duplicated here as a {@code @Max} — {@code ChallengePurchaseService}
- * already validates it against {@code MONTHS_ON_SALE}, and that's kept as
- * the single source of truth so a new month going on sale only requires
- * updating one constant.
+ * already validates it against {@code ChallengeDayCatalog#hasMonth} ("does
+ * this month have a catalog?"), and that's kept as the single source of
+ * truth so a new month only requires declaring its catalog.
+ *
+ * <p>That is NOT the same bound checkout uses: a month can be granted here
+ * before it is on sale ({@code ChallengePurchaseService.MONTHS_ON_SALE}),
+ * which is how a pre-launch test link gets created.
  */
 public record AdminGrantPurchaseRequest(
         @NotBlank String buyerName,

@@ -3,6 +3,7 @@ package com.tiam.challenge.service;
 import com.mercadopago.exceptions.MPApiException;
 import com.mercadopago.exceptions.MPException;
 import com.tiam.challenge.config.WhatsAppProperties;
+import com.tiam.challenge.domain.ChallengeDayCatalog;
 import com.tiam.challenge.domain.ChallengePurchase;
 import com.tiam.challenge.domain.ChallengePurchaseStatus;
 import com.tiam.challenge.dto.AdminGrantPurchaseRequest;
@@ -347,7 +348,14 @@ class ChallengePurchaseServiceTest {
     }
 
     @Test
-    void createPurchase_unsupportedMonthAboveTheLast_throwsBadRequestAndPersistsNothing() {
+    void createPurchase_month5_hasACatalogButIsNotOnSale_throwsBadRequestAndPersistsNothing() {
+        // Month 5's catalog exists (that's what lets the admin grant hand out a
+        // test link for it) but it is NOT for sale yet: checkout is gated by
+        // MONTHS_ON_SALE, not by whether a catalog exists. The precondition below
+        // is what makes this test meaningful — if someone "simplified" the
+        // checkout bound into something derived from the catalog, month 5 would
+        // silently start selling and this would go red.
+        //
         // Validation must short-circuit before isConfigured()/persistence/MP — no
         // stub for mercadoPagoService.isConfigured() here on purpose: reaching it
         // for real (not as a stub setup) would fail verifyNoInteractions below.
@@ -355,14 +363,28 @@ class ChallengePurchaseServiceTest {
         // the pre-existing "MP not configured" guard also throws a bare
         // BadRequestException, and with isConfigured() unstubbed (defaults to
         // false) that guard would produce a false-green for the wrong reason if
-        // The probe moves up every time a month goes on sale: it was 3, then 4.
-        // Months 1-4 all sell now, so 5 is the genuinely unsupported one.
+        // validation ever stopped running first.
+        assertThat(ChallengeDayCatalog.hasMonth(5)).isTrue();
         CreatePurchaseRequest request =
                 new CreatePurchaseRequest("Manuel Robles", "11 2233-4455", "buyer@example.com", 5);
 
         assertThatThrownBy(() -> service.createPurchase(request))
                 .isInstanceOf(BadRequestException.class)
-                .hasMessageContaining("challenge month");
+                .hasMessageContaining("Unsupported challenge month: 5");
+
+        verifyNoInteractions(challengePurchaseRepository, mercadoPagoService);
+    }
+
+    @Test
+    void createPurchase_monthBeyondEveryCatalog_throwsBadRequestAndPersistsNothing() {
+        // Same short-circuit as above, for a month that has neither a catalog nor
+        // a place on sale. This probe moves up every time a month gets a catalog.
+        CreatePurchaseRequest request =
+                new CreatePurchaseRequest("Manuel Robles", "11 2233-4455", "buyer@example.com", 6);
+
+        assertThatThrownBy(() -> service.createPurchase(request))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("Unsupported challenge month: 6");
 
         verifyNoInteractions(challengePurchaseRepository, mercadoPagoService);
     }
@@ -533,6 +555,48 @@ class ChallengePurchaseServiceTest {
         verify(challengePurchaseRepository, never()).save(any());
     }
 
+    @Test
+    void createPurchase_phoneAlsoHasMonth5Granted_stillSaysAllMonthsOnSaleAreOwned() {
+        // Month 5 can exist on a phone before it is for sale (a manual admin
+        // grant). It must not change what checkout offers: months 1-4 are all
+        // owned, so there is still nothing to buy — and the message keeps counting
+        // the months on SALE (4), not "5" just because a fifth catalog exists.
+        when(challengePurchaseRepository.findByPhoneAndActivoTrue("541122334455"))
+                .thenReturn(paidMonths(1, 2, 3, 4, 5));
+
+        CreatePurchaseRequest request =
+                new CreatePurchaseRequest("Manuel Robles", "11 2233-4455", "buyer@example.com", null);
+
+        assertThatThrownBy(() -> service.createPurchase(request))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("4 meses");
+
+        verifyNoInteractions(mercadoPagoService);
+        verify(challengePurchaseRepository, never()).save(any());
+    }
+
+    @Test
+    void createPurchase_phoneHasMonth5GrantedButNotMonth4_autoAssignsMonth4() throws MPException, MPApiException {
+        // A manually granted month 5 neither counts toward months 1-4 nor hides the
+        // gap at month 4 — the auto-assign loop only ever walks the months on sale.
+        when(challengePurchaseRepository.findByPhoneAndActivoTrue("541122334455"))
+                .thenReturn(paidMonths(1, 2, 3, 5));
+        when(mercadoPagoService.isConfigured()).thenReturn(true);
+        when(challengePurchaseRepository.save(any(ChallengePurchase.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(mercadoPagoService.createPreference(any(), any(), any(), any()))
+                .thenReturn("http://mock-init-point");
+
+        CreatePurchaseRequest request =
+                new CreatePurchaseRequest("Manuel Robles", "11 2233-4455", "buyer@example.com", null);
+
+        service.createPurchase(request);
+
+        ArgumentCaptor<ChallengePurchase> captor = ArgumentCaptor.forClass(ChallengePurchase.class);
+        verify(challengePurchaseRepository).save(captor.capture());
+        assertThat(captor.getValue().getChallengeMonth()).isEqualTo(4);
+    }
+
     /** PAID purchases for the given months, all on the same phone. */
     private List<ChallengePurchase> paidMonths(int... months) {
         return Arrays.stream(months)
@@ -607,8 +671,8 @@ class ChallengePurchaseServiceTest {
 
     @Test
     void createPurchase_unsupportedMonthZero_throwsBadRequest() {
-        // Guards that the "positive but not in {1,2}" allowlist doesn't
-        // accidentally accept non-positive values too (an off-by-one a ">2"
+        // Guards that the "1 through the last month on sale" allowlist doesn't
+        // accidentally accept non-positive values too (an off-by-one a "> N"
         // check alone would miss).
         CreatePurchaseRequest request =
                 new CreatePurchaseRequest("Manuel Robles", "11 2233-4455", "buyer@example.com", 0);
@@ -706,15 +770,61 @@ class ChallengePurchaseServiceTest {
     }
 
     @Test
-    void grantManualPurchase_unsupportedMonth_throwsBadRequestAndPersistsNothing() {
+    void grantManualPurchase_month5_isAcceptedEvenThoughItIsNotOnSaleYet() {
+        // The admin grant is bounded by which months HAVE a catalog, not by which
+        // are for sale — that is what lets the owner mint a month-5 test link
+        // before launch. Checkout (createPurchase) still rejects month 5; see
+        // createPurchase_month5_hasACatalogButIsNotOnSale_...
+        when(challengePurchaseRepository.findByPhoneAndActivoTrue("541122334455"))
+                .thenReturn(List.of());
+        when(challengePurchaseRepository.save(any(ChallengePurchase.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(whatsAppProperties.getDesafioPlayBaseUrl()).thenReturn("http://localhost:5173/desafio");
+
         AdminGrantPurchaseRequest request =
                 new AdminGrantPurchaseRequest("Amelia", "11 2233-4455", null, 5);
 
+        AdminGrantPurchaseResponse response = service.grantManualPurchase(request);
+
+        ArgumentCaptor<ChallengePurchase> captor = ArgumentCaptor.forClass(ChallengePurchase.class);
+        verify(challengePurchaseRepository).save(captor.capture());
+        ChallengePurchase saved = captor.getValue();
+        assertThat(saved.getChallengeMonth()).isEqualTo(5);
+        assertThat(saved.getStatus()).isEqualTo(ChallengePurchaseStatus.PAID);
+        assertThat(saved.getPurchaseDate()).isNotNull();
+        assertThat(response.challengeMonth()).isEqualTo(5);
+        assertThat(response.playLink()).isEqualTo("http://localhost:5173/desafio/" + response.accessToken());
+    }
+
+    @Test
+    void grantManualPurchase_monthBeyondEveryCatalog_throwsBadRequestAndPersistsNothing() {
+        // This probe moves up every time a month gets a catalog: it was 5 until
+        // month 5's catalog landed. A month with no catalog can never be played,
+        // so granting one has to fail here with a 400, not 500 at play time.
+        AdminGrantPurchaseRequest request =
+                new AdminGrantPurchaseRequest("Amelia", "11 2233-4455", null, 6);
+
         assertThatThrownBy(() -> service.grantManualPurchase(request))
                 .isInstanceOf(BadRequestException.class)
-                .hasMessageContaining("challenge month");
+                .hasMessageContaining("Unsupported challenge month: 6");
 
-        verify(challengePurchaseRepository, never()).save(any());
+        verifyNoInteractions(challengePurchaseRepository);
+    }
+
+    @Test
+    void grantManualPurchase_monthZero_throwsBadRequestAndPersistsNothing() {
+        // The DTO's @Min(1) is the first line of defense at the HTTP layer, but the
+        // service must not depend on it: "has a catalog" is a two-sided question,
+        // and a bound that only checked the top would let month 0 (or a negative)
+        // through when the service is called directly.
+        AdminGrantPurchaseRequest request =
+                new AdminGrantPurchaseRequest("Amelia", "11 2233-4455", null, 0);
+
+        assertThatThrownBy(() -> service.grantManualPurchase(request))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("Unsupported challenge month: 0");
+
+        verifyNoInteractions(challengePurchaseRepository);
     }
 
     @Test

@@ -21,6 +21,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -245,6 +246,34 @@ class ChallengeDayResultServiceTest {
         assertThat(response.area()).isEqualTo("atencion");
     }
 
+    @Test
+    void completeDay_month5Purchase_derivesAreaFromMonth5Catalog() {
+        // Día 5 is "ejecutivas" only in month 5's catalog (months 1-4 have
+        // calculo, praxias, orientacion and atencion there) — proves a month-5
+        // purchase is routed to its OWN catalog and not to an earlier month's.
+        givenPurchase(Instant.now(), 5, 5);
+        givenNoExistingResult(5);
+
+        ChallengeDayResultResponse response =
+            service.completeDay(ACCESS_TOKEN, 5, new CompleteDayRequest(0, 10));
+
+        assertThat(response.area()).isEqualTo("ejecutivas");
+    }
+
+    @Test
+    void completeDay_month5Purchase_day14IsACardAndIsRejected() {
+        // Día 14 is a playable GAME in months 1, 2 and 4 but a CARD in month 5 —
+        // if a month-5 purchase were routed to the wrong catalog, a result for it
+        // would be silently accepted as bogus data instead of rejected.
+        givenPurchase(Instant.now(), 14, 5);
+
+        assertThatThrownBy(() -> service.completeDay(ACCESS_TOKEN, 14, new CompleteDayRequest(0, 0)))
+            .isInstanceOf(BadRequestException.class)
+            .hasMessageContaining("no completable game");
+
+        verify(challengeDayResultRepository, never()).save(any());
+    }
+
     // --- getProgress: streak --------------------------------------------------------
 
     @Test
@@ -400,6 +429,42 @@ class ChallengeDayResultServiceTest {
 
         assertThat(progress.streak().current()).isEqualTo(1);
         assertThat(progress.streak().longest()).isEqualTo(1);
+    }
+
+    @Test
+    void getProgress_month5Purchase_areaBreakdownUsesMonth5Catalog() {
+        // Same routing proof as month 2's, through getProgress's own
+        // computeAreaBreakdown path. Día 5 is "ejecutivas" in month 5 but
+        // "calculo" in month 1 — month 1's área must not leak in.
+        givenPurchase(Instant.now(), 5, 5);
+        givenResults(List.of(resultForDay(5))); // fixture stores area="memoria" — irrelevant, it's re-derived
+
+        ChallengeProgressResponse progress = service.getProgress(ACCESS_TOKEN);
+
+        assertThat(areaBreakdown(progress, "ejecutivas").played()).isEqualTo(1); // month 5's área for día 5
+        assertThat(areaBreakdown(progress, "calculo").played()).isZero(); // month 1's área for día 5
+    }
+
+    @Test
+    void getProgress_month5Purchase_allTwentyNineGameDaysPlayed_completesTheChallengeThroughTheCardDay() {
+        // Month 5 has 29 playable days (día 14 is a CARD). CHALLENGE_COMPLETE is
+        // proportional to THIS month's game-day count, and the card day is an
+        // automatic pass-through that must not break the streak — so playing every
+        // playable day reads as a complete challenge with an unbroken 30-day run.
+        // (A month with 30 game days, or a catalog that treated día 14 as a game,
+        // would read 29 of 30 and a streak broken at día 14.)
+        givenPurchase(Instant.now().minusSeconds(40L * 86_400), 30, 5);
+        List<ChallengeDayResult> everyGameDay = IntStream.rangeClosed(1, 30)
+            .filter(day -> day != 14)
+            .mapToObj(this::resultForDay)
+            .toList();
+        givenResults(everyGameDay);
+
+        ChallengeProgressResponse progress = service.getProgress(ACCESS_TOKEN);
+
+        assertThat(badge(progress, "CHALLENGE_COMPLETE").earned()).isTrue();
+        assertThat(progress.streak().current()).isEqualTo(30);
+        assertThat(progress.streak().longest()).isEqualTo(30);
     }
 
     @Test

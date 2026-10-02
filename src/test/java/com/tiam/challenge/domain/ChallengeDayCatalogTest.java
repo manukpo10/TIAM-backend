@@ -7,8 +7,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Guards the hand-transcribed day -> area data for both challenge months. Month 2's
- * table is pure literal data with no computation behind it, so an exhaustive,
+ * Guards the hand-transcribed day -> area data for every challenge month. Each
+ * month's table is pure literal data with no computation behind it, so an exhaustive,
  * day-by-day assertion is the only thing that would catch a transcription slip
  * (e.g. two adjacent areas swapped) — a spot-check would silently miss it.
  */
@@ -128,6 +128,96 @@ class ChallengeDayCatalogTest {
                         .isEqualTo(expectedArea));
     }
 
+    // --- month 5: exhaustive literal data check ---------------------------------
+
+    @Test
+    void dayInfo_month5_matchesContentPlanForEveryDay() {
+        Map<Integer, String> expectedAreaByDay = Map.ofEntries(
+                Map.entry(1, "lenguaje"), Map.entry(2, "memoria"), Map.entry(3, "calculo"),
+                Map.entry(4, "atencion"), Map.entry(5, "ejecutivas"), Map.entry(6, "orientacion"),
+                Map.entry(7, "lenguaje"), Map.entry(8, "calculo"), Map.entry(9, "memoria"),
+                Map.entry(10, "atencion"), Map.entry(11, "calculo"), Map.entry(12, "lenguaje"),
+                Map.entry(13, "ejecutivas"), Map.entry(14, "lenguaje"), Map.entry(15, "memoria"),
+                Map.entry(16, "calculo"), Map.entry(17, "orientacion"), Map.entry(18, "agnosias"),
+                Map.entry(19, "lenguaje"), Map.entry(20, "calculo"), Map.entry(21, "atencion"),
+                Map.entry(22, "ejecutivas"), Map.entry(23, "lenguaje"), Map.entry(24, "calculo"),
+                Map.entry(25, "praxias"), Map.entry(26, "ejecutivas"), Map.entry(27, "lenguaje"),
+                Map.entry(28, "calculo"), Map.entry(29, "atencion"), Map.entry(30, "calculo"));
+
+        // Map.ofEntries rejects a duplicate key but happily accepts a MISSING one —
+        // without this, a day dropped from the table above would silently skip its
+        // assertion instead of failing.
+        assertThat(expectedAreaByDay).hasSize(30);
+
+        expectedAreaByDay.forEach((day, expectedArea) ->
+                assertThat(ChallengeDayCatalog.dayInfo(5, day).area())
+                        .as("day %d", day)
+                        .isEqualTo(expectedArea));
+    }
+
+    @Test
+    void dayInfo_month5_everyDayIsGameExceptDay14WhichIsACard() {
+        for (int day = 1; day <= 30; day++) {
+            ChallengeDayType expected = day == 14 ? ChallengeDayType.CARD : ChallengeDayType.GAME;
+            assertThat(ChallengeDayCatalog.dayInfo(5, day).type())
+                    .as("day %d", day)
+                    .isEqualTo(expected);
+        }
+    }
+
+    // --- every month: area ids ----------------------------------------------------
+
+    @Test
+    void dayInfo_everyMonth_usesOnlyKnownAreaIds() {
+        // The per-month literal tables above would happily agree with a typo that
+        // was made twice ("calculo" vs "cálculo"); this checks against AREAS, which
+        // is the list the progress panel actually buckets by. Walks every month that
+        // has a catalog, so a future month is covered without touching this test.
+        for (int month = 1; ChallengeDayCatalog.hasMonth(month); month++) {
+            for (int day = 1; day <= 30; day++) {
+                assertThat(ChallengeDayCatalog.AREAS)
+                        .as("month %d day %d", month, day)
+                        .contains(ChallengeDayCatalog.dayInfo(month, day).area());
+            }
+        }
+    }
+
+    // --- hasMonth: which months have a catalog -----------------------------------
+
+    @Test
+    void hasMonth_isTrueForEveryMonthWithACatalog() {
+        for (int month = 1; month <= 5; month++) {
+            assertThat(ChallengeDayCatalog.hasMonth(month)).as("month %d", month).isTrue();
+        }
+    }
+
+    @Test
+    void hasMonth_isFalseForMonthsWithoutACatalog() {
+        // Moves up together with the probe in dayInfo_unknownMonth_throws: 6 is the
+        // first month with no catalog.
+        assertThat(ChallengeDayCatalog.hasMonth(0)).isFalse();
+        assertThat(ChallengeDayCatalog.hasMonth(-1)).isFalse();
+        assertThat(ChallengeDayCatalog.hasMonth(6)).isFalse();
+        assertThat(ChallengeDayCatalog.hasMonth(Integer.MAX_VALUE)).isFalse();
+    }
+
+    @Test
+    void hasMonth_agreesWithWhatDayInfoActuallyResolves() {
+        // The admin grant trusts hasMonth to mean "dayInfo will resolve for this
+        // month". If the two ever drifted apart, a granted purchase would blow up
+        // with a 500 at play time instead of a clean 400 at grant time.
+        for (int month = -1; month <= 8; month++) {
+            int probe = month;
+            if (ChallengeDayCatalog.hasMonth(probe)) {
+                assertThat(ChallengeDayCatalog.dayInfo(probe, 1)).as("month %d", probe).isNotNull();
+            } else {
+                assertThatThrownBy(() -> ChallengeDayCatalog.dayInfo(probe, 1))
+                        .as("month %d", probe)
+                        .isInstanceOf(IllegalArgumentException.class);
+            }
+        }
+    }
+
     // --- error handling ----------------------------------------------------------
 
     @Test
@@ -140,9 +230,10 @@ class ChallengeDayCatalogTest {
 
     @Test
     void dayInfo_unknownMonth_throws() {
-        // This probe moves up every time a month ships: it was 3, then 4, and
-        // months 1-4 are all real catalogs now — 5 is the genuinely unknown one.
-        assertThatThrownBy(() -> ChallengeDayCatalog.dayInfo(5, 1))
+        // This probe moves up every time a month gets a catalog: it was 3, then 4,
+        // then 5, and months 1-5 are all real catalogs now — 6 is the genuinely
+        // unknown one.
+        assertThatThrownBy(() -> ChallengeDayCatalog.dayInfo(6, 1))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -164,5 +255,12 @@ class ChallengeDayCatalogTest {
         // its entry in DAYS_MONTH_4 and challengeContent.ts.
         assertThat(ChallengeDayCatalog.gameDayCount(4)).isEqualTo(29);
         assertThat(ChallengeDayCatalog.dayInfo(4, 18).type()).isEqualTo(ChallengeDayType.CARD);
+    }
+
+    @Test
+    void gameDayCount_month5_isTwentyNine_becauseDay14IsACard() {
+        // Badges/streaks (HALFWAY, CHALLENGE_COMPLETE) scale off this number, so a
+        // month-5 buyer who plays every playable day must be able to reach 100%.
+        assertThat(ChallengeDayCatalog.gameDayCount(5)).isEqualTo(29);
     }
 }

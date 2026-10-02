@@ -3,6 +3,7 @@ package com.tiam.challenge.service;
 import com.mercadopago.exceptions.MPApiException;
 import com.mercadopago.exceptions.MPException;
 import com.tiam.challenge.config.WhatsAppProperties;
+import com.tiam.challenge.domain.ChallengeDayCatalog;
 import com.tiam.challenge.domain.ChallengePurchase;
 import com.tiam.challenge.domain.ChallengePurchaseStatus;
 import com.tiam.challenge.dto.AdminGrantPurchaseRequest;
@@ -45,11 +46,13 @@ public class ChallengePurchaseService {
      * How many months are on sale — the ceiling for both the explicit-month
      * allowlist and {@link #nextUnpaidMonth}'s auto-assignment.
      *
-     * <p>Kept separate from how many catalogs {@code ChallengeDayCatalog}
-     * declares: a month's 30 days land over several commits, and until every
-     * one of them is playable, selling it would strand a buyer on an empty day.
-     * Month 4 is complete, so the two numbers happen to agree again — they are
-     * still two different questions.
+     * <p>Deliberately NOT derived from how many catalogs
+     * {@code ChallengeDayCatalog} declares: a month's catalog can exist before
+     * the month is for sale, and selling it early would hand a buyer content
+     * that isn't ready. Month 5 is exactly that today — its catalog is
+     * declared, so {@link #grantManualPurchase} can mint a test link for it
+     * (that only needs a catalog), while checkout still stops at month 4.
+     * Raising this constant is the launch switch for the next month.
      */
     private static final int MONTHS_ON_SALE = 4;
 
@@ -157,6 +160,13 @@ public class ChallengePurchaseService {
      * {@code mpPaymentId} stays null on purpose: inventing a fake value
      * would misrepresent that no real MP transaction exists.
      *
+     * <p>Accepts any month that has a catalog ({@link ChallengeDayCatalog#hasMonth}),
+     * which can be AHEAD of {@link #MONTHS_ON_SALE}: that is what lets the
+     * owner mint a link for a month that hasn't launched yet and try it end
+     * to end. It is bounded by "can this month be played at all", not by
+     * "is it for sale" — a month without a catalog is rejected here with a
+     * clean 400 instead of failing later at play time.
+     *
      * <p>Idempotent per (phone, month): re-running this for a buyer who
      * already has that month PAID returns their existing link instead of
      * creating a second row, so retrying after an uncertain result (e.g. a
@@ -168,7 +178,7 @@ public class ChallengePurchaseService {
      */
     @Transactional
     public AdminGrantPurchaseResponse grantManualPurchase(AdminGrantPurchaseRequest request) {
-        if (request.challengeMonth() > MONTHS_ON_SALE) {
+        if (!ChallengeDayCatalog.hasMonth(request.challengeMonth())) {
             throw new BadRequestException("Unsupported challenge month: " + request.challengeMonth());
         }
 
@@ -207,13 +217,16 @@ public class ChallengePurchaseService {
     }
 
     /**
-     * The lowest month (1-3) this phone doesn't already have a PAID purchase
-     * for — first-time buyers get 1, a phone that already has month 1 PAID
-     * gets 2, and so on. Only PAID rows count: an abandoned PENDING checkout
-     * or a FAILED payment for a month doesn't block buying that same month
-     * again. Throws once every month is already PAID — there's no further month
-     * to fall back to, and silently reassigning an already-owned month would
-     * charge the buyer again for nothing new.
+     * The lowest month on sale (1 through {@link #MONTHS_ON_SALE}) this phone
+     * doesn't already have a PAID purchase for — first-time buyers get 1, a
+     * phone that already has month 1 PAID gets 2, and so on. Only PAID rows
+     * count: an abandoned PENDING checkout or a FAILED payment for a month
+     * doesn't block buying that same month again. Throws once every month on
+     * sale is already PAID — there's no further month to fall back to, and
+     * silently reassigning an already-owned month would charge the buyer
+     * again for nothing new. A month beyond the ones on sale that the phone
+     * already holds (a manual grant ahead of launch) is neither offered nor
+     * counted: the loop never looks past {@link #MONTHS_ON_SALE}.
      *
      * <p>Only ever called from inside {@link #createPurchase}'s per-phone
      * {@code synchronized} block — calling it unguarded would reopen the

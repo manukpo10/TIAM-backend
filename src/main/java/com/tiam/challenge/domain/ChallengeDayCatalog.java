@@ -195,6 +195,48 @@ public final class ChallengeDayCatalog {
             Map.entry(29, new DayInfo(ChallengeDayType.GAME, "orientacion")),
             Map.entry(30, new DayInfo(ChallengeDayType.GAME, "calculo")));
 
+    /**
+     * "Mes 5" — independent catalog, declared AHEAD of its launch: month 5 is
+     * not on sale yet (see {@code ChallengePurchaseService.MONTHS_ON_SALE}),
+     * but having its catalog here is what lets the admin grant endpoint hand
+     * out a test link for it ({@link #hasMonth}) and lets every play-time
+     * lookup resolve its days.
+     *
+     * Día 14 is the month's only CARD day (lápiz y papel, nothing to complete),
+     * so {@link #gameDayCount(int)} is 29 for this month, not 30.
+     */
+    private static final Map<Integer, DayInfo> DAYS_MONTH_5 = Map.ofEntries(
+            Map.entry(1, new DayInfo(ChallengeDayType.GAME, "lenguaje")),
+            Map.entry(2, new DayInfo(ChallengeDayType.GAME, "memoria")),
+            Map.entry(3, new DayInfo(ChallengeDayType.GAME, "calculo")),
+            Map.entry(4, new DayInfo(ChallengeDayType.GAME, "atencion")),
+            Map.entry(5, new DayInfo(ChallengeDayType.GAME, "ejecutivas")),
+            Map.entry(6, new DayInfo(ChallengeDayType.GAME, "orientacion")),
+            Map.entry(7, new DayInfo(ChallengeDayType.GAME, "lenguaje")),
+            Map.entry(8, new DayInfo(ChallengeDayType.GAME, "calculo")),
+            Map.entry(9, new DayInfo(ChallengeDayType.GAME, "memoria")),
+            Map.entry(10, new DayInfo(ChallengeDayType.GAME, "atencion")),
+            Map.entry(11, new DayInfo(ChallengeDayType.GAME, "calculo")),
+            Map.entry(12, new DayInfo(ChallengeDayType.GAME, "lenguaje")),
+            Map.entry(13, new DayInfo(ChallengeDayType.GAME, "ejecutivas")),
+            Map.entry(14, new DayInfo(ChallengeDayType.CARD, "lenguaje")),
+            Map.entry(15, new DayInfo(ChallengeDayType.GAME, "memoria")),
+            Map.entry(16, new DayInfo(ChallengeDayType.GAME, "calculo")),
+            Map.entry(17, new DayInfo(ChallengeDayType.GAME, "orientacion")),
+            Map.entry(18, new DayInfo(ChallengeDayType.GAME, "agnosias")),
+            Map.entry(19, new DayInfo(ChallengeDayType.GAME, "lenguaje")),
+            Map.entry(20, new DayInfo(ChallengeDayType.GAME, "calculo")),
+            Map.entry(21, new DayInfo(ChallengeDayType.GAME, "atencion")),
+            Map.entry(22, new DayInfo(ChallengeDayType.GAME, "ejecutivas")),
+            Map.entry(23, new DayInfo(ChallengeDayType.GAME, "lenguaje")),
+            Map.entry(24, new DayInfo(ChallengeDayType.GAME, "calculo")),
+            Map.entry(25, new DayInfo(ChallengeDayType.GAME, "praxias")),
+            Map.entry(26, new DayInfo(ChallengeDayType.GAME, "ejecutivas")),
+            Map.entry(27, new DayInfo(ChallengeDayType.GAME, "lenguaje")),
+            Map.entry(28, new DayInfo(ChallengeDayType.GAME, "calculo")),
+            Map.entry(29, new DayInfo(ChallengeDayType.GAME, "atencion")),
+            Map.entry(30, new DayInfo(ChallengeDayType.GAME, "calculo")));
+
     public static final int TOTAL_DAYS = DAYS_MONTH_1.size();
 
     /** How many of this month's 30 days are actually completable games — see class doc. */
@@ -207,6 +249,20 @@ public final class ChallengeDayCatalog {
             "memoria", "atencion", "lenguaje", "praxias", "agnosias", "calculo", "orientacion", "ejecutivas");
 
     private ChallengeDayCatalog() {}
+
+    /**
+     * Whether this month has a day catalog at all — a different question from
+     * whether it is for sale. A month's catalog can be declared ahead of its
+     * launch (so a test link can be granted for it first);
+     * {@code ChallengePurchaseService.MONTHS_ON_SALE} is what gates checkout.
+     *
+     * <p>Answered by the same lookup {@link #dayInfo} resolves through, never by
+     * a separate count, so the two can't drift: if this says {@code true}, the
+     * month's days will resolve instead of throwing at play time.
+     */
+    public static boolean hasMonth(int challengeMonth) {
+        return findCatalog(challengeMonth) != null;
+    }
 
     public static DayInfo dayInfo(int challengeMonth, int day) {
         DayInfo info = catalogFor(challengeMonth).get(day);
@@ -222,12 +278,26 @@ public final class ChallengeDayCatalog {
     }
 
     private static Map<Integer, DayInfo> catalogFor(int challengeMonth) {
+        Map<Integer, DayInfo> catalog = findCatalog(challengeMonth);
+        if (catalog == null) {
+            throw new IllegalArgumentException("Unknown challenge month: " + challengeMonth);
+        }
+        return catalog;
+    }
+
+    /**
+     * The one place that maps a month number to its catalog — {@code null} when
+     * the month has none. Adding a month means adding its {@code case} here and
+     * nothing else: {@link #hasMonth} and {@link #catalogFor} both read from it.
+     */
+    private static Map<Integer, DayInfo> findCatalog(int challengeMonth) {
         return switch (challengeMonth) {
             case 1 -> DAYS_MONTH_1;
             case 2 -> DAYS_MONTH_2;
             case 3 -> DAYS_MONTH_3;
             case 4 -> DAYS_MONTH_4;
-            default -> throw new IllegalArgumentException("Unknown challenge month: " + challengeMonth);
+            case 5 -> DAYS_MONTH_5;
+            default -> null;
         };
     }
 }
