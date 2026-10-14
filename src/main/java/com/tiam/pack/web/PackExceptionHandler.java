@@ -88,6 +88,16 @@ public class PackExceptionHandler {
                         "No pudimos completar la operación ahora. Probá de nuevo en unos segundos.", maskedPath(request)));
     }
 
+    /**
+     * Last resort for the pack endpoints. The app-wide handler would log and echo the raw request path,
+     * which here contains the order token, so anything unexpected is answered (and logged) with the token masked.
+     */
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<ApiError> handleUnexpected(Exception ex, HttpServletRequest request) {
+        log.error("Unexpected error on {} {}", request.getMethod(), maskedPath(request), ex);
+        return error(HttpStatus.INTERNAL_SERVER_ERROR, "Internal Server Error", "An unexpected error occurred", request, null);
+    }
+
     private static ResponseEntity<ApiError> error(HttpStatus status, String reason, String message,
             HttpServletRequest request, List<String> details) {
         ApiError body = details == null

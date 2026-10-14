@@ -103,6 +103,20 @@ class PackOrderControllerTest {
     }
 
     @Test
+    void anUnexpectedFailure_isA500_whoseBodyAndLogsNeverCarryTheToken() throws Exception {
+        when(downloadService.view(any())).thenThrow(new IllegalStateException("database exploded"));
+
+        try (com.tiam.testsupport.LogCapture logs = new com.tiam.testsupport.LogCapture(PackExceptionHandler.class)) {
+            String body = mvc.perform(get("/packs/orders/" + token))
+                    .andExpect(status().isInternalServerError())
+                    .andReturn().getResponse().getContentAsString();
+
+            assertThat(body).doesNotContain(token).contains("/packs/orders/{token}");
+            assertThat(logs.allMessages()).isNotEmpty().noneMatch(message -> message.contains(token));
+        }
+    }
+
+    @Test
     void confirm_aPaymentOfAnotherOrder_isABadRequest() throws Exception {
         when(confirmationService.confirm(any(), any())).thenThrow(new BadRequestException("The payment does not belong to this order"));
 
