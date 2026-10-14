@@ -9,8 +9,10 @@ import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Transactional;
 
 public interface PackOrderRepository extends JpaRepository<PackOrder, Long> {
 
@@ -50,4 +52,29 @@ public interface PackOrderRepository extends JpaRepository<PackOrder, Long> {
             @Param("status") PackOrderStatus status,
             @Param("from") Instant from,
             @Param("to") Instant to);
+
+    /**
+     * Ids of PAID orders whose access email still has to be delivered, paid inside [since, until], oldest
+     * first. Used by {@code PackEmailRetryService}.
+     */
+    @Query("select o.id from PackOrder o where o.status = :status and o.activo = true "
+            + "and o.emailSentAt is null and length(trim(o.email)) > 0 "
+            + "and o.paidAt >= :since and o.paidAt <= :until order by o.paidAt")
+    List<Long> findIdsAwaitingAccessEmail(
+            @Param("status") PackOrderStatus status,
+            @Param("since") Instant since,
+            @Param("until") Instant until);
+
+    /**
+     * Atomically records that the access email was delivered, only if it has not been recorded yet.
+     * Returns the rows changed (1 = recorded, 0 = already recorded or unknown id).
+     *
+     * <p>{@code @Transactional} lives here on purpose: a bulk {@code @Modifying} query needs its own
+     * transaction and the caller is the non-transactional async email listener.
+     */
+    @Modifying
+    @Transactional
+    @Query("update PackOrder o set o.emailSentAt = :sentAt, o.updatedAt = :sentAt "
+            + "where o.id = :id and o.emailSentAt is null")
+    int markEmailSent(@Param("id") Long id, @Param("sentAt") Instant sentAt);
 }

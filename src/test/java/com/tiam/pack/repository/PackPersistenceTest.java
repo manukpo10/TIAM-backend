@@ -140,6 +140,49 @@ class PackPersistenceTest {
                 .doesNotContain(tooRecent.getId(), tooOld.getId(), neverReachedMp.getId(), paid.getId());
     }
 
+    @Test
+    void markEmailSent_recordsTheDeliveryOnlyOnce() {
+        PackOrder paid = paid("mail@example.com", 60);
+        em.clear();
+        Instant firstAt = Instant.now().truncatedTo(ChronoUnit.MILLIS);
+
+        int first = orders.markEmailSent(paid.getId(), firstAt);
+        int second = orders.markEmailSent(paid.getId(), firstAt.plusSeconds(60));
+        em.clear();
+
+        assertThat(first).isEqualTo(1);
+        assertThat(second).isEqualTo(0);
+        assertThat(orders.findById(paid.getId()).orElseThrow().getEmailSentAt()).isEqualTo(firstAt);
+    }
+
+    @Test
+    void findIdsAwaitingAccessEmail_returnsPaidOrdersWithoutAnEmailInsideTheWindow() {
+        PackOrder waiting = paid("wait@example.com", 60);
+        PackOrder justPaid = paid("wait@example.com", 1);
+        PackOrder tooOld = paid("wait@example.com", 60 * 24 * 5);
+        PackOrder alreadySent = paid("wait@example.com", 60);
+        alreadySent.setEmailSentAt(Instant.now());
+        orders.saveAndFlush(alreadySent);
+        PackOrder pending = orders.saveAndFlush(order("wait@example.com"));
+        em.clear();
+        Instant now = Instant.now();
+
+        List<Long> ids = orders.findIdsAwaitingAccessEmail(PackOrderStatus.PAID,
+                now.minus(72, ChronoUnit.HOURS), now.minus(5, ChronoUnit.MINUTES));
+
+        assertThat(ids).contains(waiting.getId())
+                .doesNotContain(justPaid.getId(), tooOld.getId(), alreadySent.getId(), pending.getId());
+    }
+
+    private PackOrder paid(String email, long paidMinutesAgo) {
+        PackOrder order = order(email);
+        order.setStatus(PackOrderStatus.PAID);
+        order.setPaidAt(Instant.now().minus(paidMinutesAgo, ChronoUnit.MINUTES));
+        order.setAccessExpiresAt(Instant.now().plus(90, ChronoUnit.DAYS));
+        order.setMpPaymentId("PAY-" + PackTokens.newToken());
+        return orders.saveAndFlush(order);
+    }
+
     private PackOrder checkout(String email) {
         PackOrder order = order(email);
         order.setInitPoint("https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=X");
