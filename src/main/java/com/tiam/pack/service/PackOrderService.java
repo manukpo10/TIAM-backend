@@ -7,6 +7,7 @@ import com.tiam.pack.config.PackProperties;
 import com.tiam.pack.domain.PackOrder;
 import com.tiam.pack.domain.PackOrderPaidEvent;
 import com.tiam.pack.domain.PackOrderStatus;
+import com.tiam.pack.domain.PackTokens;
 import com.tiam.pack.repository.PackOrderRepository;
 import java.time.Clock;
 import java.time.Instant;
@@ -73,6 +74,45 @@ public class PackOrderService {
                     orderId, payment.paymentId(), payment.status());
         }
         return order.getStatus();
+    }
+
+    /** The result of {@link #rotateAccess}: the order with its NEW token, and what to put back if delivery fails. */
+    public record AccessRotation(PackOrder order, String previousToken, Instant previousExpiry) {
+    }
+
+    /**
+     * Gives a paid order a brand-new access token and a fresh access window, invalidating the old link (which
+     * may have leaked). Used when the buyer asks for their access again. Empty when the order is not PAID
+     * (never revives a refunded or unpaid one). Does not touch {@code email_sent_at}.
+     */
+    @Transactional
+    public Optional<AccessRotation> rotateAccess(Long orderId) {
+        PackOrder order = orders.findWithLockById(orderId).orElse(null);
+        if (order == null || order.getStatus() != PackOrderStatus.PAID) {
+            return Optional.empty();
+        }
+        AccessRotation rotation = new AccessRotation(order, order.getAccessToken(), order.getAccessExpiresAt());
+        order.setAccessToken(PackTokens.newToken());
+        order.setAccessExpiresAt(clock.instant().plus(properties.getAccessDays(), ChronoUnit.DAYS));
+        orders.save(order);
+        log.info("Pack order id={}: access token rotated and access window renewed", orderId);
+        return Optional.of(rotation);
+    }
+
+    /**
+     * Undoes a rotation whose email could not be delivered, so the buyer is not left with a dead old link and
+     * a new link they never received. A no-op if the token has changed again since.
+     */
+    @Transactional
+    public void restoreAccess(Long orderId, String rotatedToken, String previousToken, Instant previousExpiry) {
+        orders.findWithLockById(orderId).ifPresent(order -> {
+            if (rotatedToken != null && rotatedToken.equals(order.getAccessToken())) {
+                order.setAccessToken(previousToken);
+                order.setAccessExpiresAt(previousExpiry);
+                orders.save(order);
+                log.warn("Pack order id={}: access rotation undone because the new link could not be emailed", orderId);
+            }
+        });
     }
 
     private void onApproved(PackOrder order, PaymentSnapshot payment) {

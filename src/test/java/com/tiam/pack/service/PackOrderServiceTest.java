@@ -429,6 +429,82 @@ class PackOrderServiceTest {
         verifyNoMoreInteractions(ownerNotifier);
     }
 
+    // --- re-sending access: rotate the token, renew the window --------------------------------------------------
+
+    @Test
+    void rotateAccess_issuesANewToken_andRenewsTheAccessWindow() {
+        PackOrder order = givenOrder(PackOrderStatus.PAID, "14990.00");
+        order.setAccessToken("old-token");
+        order.setAccessExpiresAt(NOW.plus(3, ChronoUnit.DAYS));
+
+        PackOrderService.AccessRotation rotation = service.rotateAccess(42L).orElseThrow();
+
+        assertThat(order.getAccessToken()).isNotEqualTo("old-token").hasSize(43);
+        assertThat(order.getAccessExpiresAt()).isEqualTo(NOW.plus(90, ChronoUnit.DAYS));
+        assertThat(rotation.previousToken()).isEqualTo("old-token");
+        assertThat(rotation.previousExpiry()).isEqualTo(NOW.plus(3, ChronoUnit.DAYS));
+        assertThat(rotation.order()).isSameAs(order);
+        verify(orders).save(order);
+    }
+
+    @Test
+    void rotateAccess_alsoRevivesAnOrderWhoseWindowAlreadyClosed() {
+        PackOrder order = givenOrder(PackOrderStatus.PAID, "14990.00");
+        order.setAccessExpiresAt(NOW.minus(10, ChronoUnit.DAYS));
+
+        service.rotateAccess(42L);
+
+        assertThat(order.getAccessExpiresAt()).isEqualTo(NOW.plus(90, ChronoUnit.DAYS));
+    }
+
+    @Test
+    void rotateAccess_neverTouchesAnOrderThatIsNotPaid() {
+        for (PackOrderStatus status : new PackOrderStatus[] {PackOrderStatus.PENDING, PackOrderStatus.FAILED,
+                PackOrderStatus.REVIEW, PackOrderStatus.REVOKED}) {
+            PackOrder order = givenOrder(status, "14990.00");
+            order.setAccessToken("keep-me");
+
+            assertThat(service.rotateAccess(42L)).as("status %s", status).isEmpty();
+            assertThat(order.getAccessToken()).isEqualTo("keep-me");
+        }
+        verify(orders, never()).save(any());
+    }
+
+    @Test
+    void rotateAccess_doesNotTouchEmailSentAt_soTheFirstEmailLogicIsUnaffected() {
+        PackOrder order = givenOrder(PackOrderStatus.PAID, "14990.00");
+        Instant sent = NOW.minus(1, ChronoUnit.DAYS);
+        order.setEmailSentAt(sent);
+
+        service.rotateAccess(42L);
+
+        assertThat(order.getEmailSentAt()).isEqualTo(sent);
+    }
+
+    @Test
+    void restoreAccess_putsTheOldTokenBack_onlyIfTheNewOneIsStillTheCurrentOne() {
+        PackOrder order = givenOrder(PackOrderStatus.PAID, "14990.00");
+        order.setAccessToken("new-token");
+        order.setAccessExpiresAt(NOW.plus(90, ChronoUnit.DAYS));
+
+        service.restoreAccess(42L, "new-token", "old-token", NOW.plus(3, ChronoUnit.DAYS));
+
+        assertThat(order.getAccessToken()).isEqualTo("old-token");
+        assertThat(order.getAccessExpiresAt()).isEqualTo(NOW.plus(3, ChronoUnit.DAYS));
+        verify(orders).save(order);
+    }
+
+    @Test
+    void restoreAccess_whenSomeoneRotatedAgainMeanwhile_leavesTheNewerTokenAlone() {
+        PackOrder order = givenOrder(PackOrderStatus.PAID, "14990.00");
+        order.setAccessToken("even-newer-token");
+
+        service.restoreAccess(42L, "new-token", "old-token", NOW);
+
+        assertThat(order.getAccessToken()).isEqualTo("even-newer-token");
+        verify(orders, never()).save(any());
+    }
+
     // --- helpers ------------------------------------------------------------------------------------------------------------
 
     private PackOrder givenOrder(PackOrderStatus status, String total) {

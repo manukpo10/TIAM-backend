@@ -63,6 +63,15 @@ public class PackProperties {
         return regretNotifyTo == null ? "" : regretNotifyTo.strip();
     }
 
+    /** The address that gets regret-form notices, or empty when none is configured. */
+    public String effectiveRegretNotifyTo() {
+        String regret = regretNotifyTo == null ? "" : regretNotifyTo.strip();
+        if (!regret.isEmpty()) {
+            return regret;
+        }
+        return ownerNotifyTo == null ? "" : ownerNotifyTo.strip();
+    }
+
     @Getter
     @Setter
     public static class Reconciliation {

@@ -39,6 +39,9 @@ public interface PackOrderRepository extends JpaRepository<PackOrder, Long> {
             @Param("status") PackOrderStatus status,
             @Param("since") Instant since);
 
+    /** The buyer's paid orders, most recently paid first. Used when they ask for their access again. */
+    List<PackOrder> findByEmailAndStatusAndActivoTrueOrderByPaidAtDesc(String email, PackOrderStatus status);
+
     long countByEmailAndStatusAndCreatedAtAfter(String email, PackOrderStatus status, Instant since);
 
     /**
