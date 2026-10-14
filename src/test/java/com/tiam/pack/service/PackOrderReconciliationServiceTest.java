@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -39,12 +40,14 @@ class PackOrderReconciliationServiceTest {
     @Mock PackOrderService packOrderService;
 
     PackProperties properties;
+    MutableClock clock;
     PackOrderReconciliationService service;
 
     @BeforeEach
     void setUp() {
         properties = new PackProperties();
-        service = new PackOrderReconciliationService(orders, mercadoPago, packOrderService, properties, new MutableClock(NOW));
+        clock = new MutableClock(NOW);
+        service = new PackOrderReconciliationService(orders, mercadoPago, packOrderService, properties, clock);
     }
 
     @Test
@@ -160,6 +163,94 @@ class PackOrderReconciliationServiceTest {
         service.reconcilePendingOrders();
 
         verify(mercadoPago, never()).findLatestPaymentByExternalReference(any());
+    }
+
+    // --- rejected-then-paid and load control ------------------------------------------------------------------
+
+    @Test
+    void alsoLooksAtRecentlyRejectedOrders_becauseABuyerCanRetryAndPayOnTheSameCheckout() throws Exception {
+        when(mercadoPago.isConfigured()).thenReturn(true);
+        PackOrder failed = stale(42L);
+        failed.setStatus(PackOrderStatus.FAILED);
+        when(orders.findStalePending(eq(PackOrderStatus.PENDING), any(), any())).thenReturn(List.of());
+        when(orders.findStalePending(eq(PackOrderStatus.FAILED), any(), any())).thenReturn(List.of(failed));
+        Payment approvedLater = payment(777L, "approved");
+        when(mercadoPago.findLatestPaymentByExternalReference("pack:42")).thenReturn(Optional.of(approvedLater));
+
+        service.reconcilePendingOrders();
+
+        ArgumentCaptor<Instant> from = ArgumentCaptor.forClass(Instant.class);
+        verify(orders).findStalePending(eq(PackOrderStatus.FAILED), from.capture(), any());
+        assertThat(from.getValue()).isEqualTo(NOW.minus(Duration.ofDays(3)));
+        verify(packOrderService).onPayment(eq(42L), any(PaymentSnapshot.class));
+    }
+
+    @Test
+    void anOrderListedByBothQueries_isCheckedOnlyOnce() throws Exception {
+        when(mercadoPago.isConfigured()).thenReturn(true);
+        when(orders.findStalePending(any(), any(), any())).thenReturn(List.of(stale(42L)));
+        Payment payment = payment(777L, "approved");
+        when(mercadoPago.findLatestPaymentByExternalReference("pack:42")).thenReturn(Optional.of(payment));
+
+        service.reconcilePendingOrders();
+
+        verify(mercadoPago, times(1)).findLatestPaymentByExternalReference("pack:42");
+    }
+
+    @Test
+    void anOrderAskedAboutRecently_isNotAskedAgainUntilItsIntervalPasses() throws Exception {
+        when(mercadoPago.isConfigured()).thenReturn(true);
+        PackOrder old = stale(42L);
+        old.setCreatedAt(NOW.minus(Duration.ofDays(3))); // older than a day: checked every 6 hours
+        when(orders.findStalePending(eq(PackOrderStatus.PENDING), any(), any())).thenReturn(List.of(old));
+        when(mercadoPago.findLatestPaymentByExternalReference("pack:42")).thenReturn(Optional.empty());
+
+        service.reconcilePendingOrders();
+        clock.advance(Duration.ofMinutes(15));
+        service.reconcilePendingOrders();
+        clock.advance(Duration.ofHours(1));
+        service.reconcilePendingOrders();
+        verify(mercadoPago, times(1)).findLatestPaymentByExternalReference("pack:42");
+
+        clock.advance(Duration.ofHours(6));
+        service.reconcilePendingOrders();
+        verify(mercadoPago, times(2)).findLatestPaymentByExternalReference("pack:42");
+    }
+
+    @Test
+    void aFreshOrder_isCheckedOnEveryRun() throws Exception {
+        when(mercadoPago.isConfigured()).thenReturn(true);
+        PackOrder fresh = stale(42L);
+        fresh.setCreatedAt(NOW.minus(Duration.ofMinutes(20)));
+        when(orders.findStalePending(eq(PackOrderStatus.PENDING), any(), any())).thenReturn(List.of(fresh));
+        when(mercadoPago.findLatestPaymentByExternalReference("pack:42")).thenReturn(Optional.empty());
+
+        service.reconcilePendingOrders();
+        clock.advance(Duration.ofMinutes(15));
+        service.reconcilePendingOrders();
+
+        verify(mercadoPago, times(2)).findLatestPaymentByExternalReference("pack:42");
+    }
+
+    @Test
+    void aSingleRunNeverAsksMercadoPagoAboutMoreThanTheConfiguredCap_newestFirst() throws Exception {
+        properties.getReconciliation().setMaxPerRun(3);
+        when(mercadoPago.isConfigured()).thenReturn(true);
+        List<PackOrder> candidates = new java.util.ArrayList<>();
+        for (long id = 1; id <= 10; id++) {
+            PackOrder order = stale(id);
+            order.setCreatedAt(NOW.minus(Duration.ofHours(1)).minusSeconds(100 - id)); // higher id = newer
+            candidates.add(order);
+        }
+        when(orders.findStalePending(eq(PackOrderStatus.PENDING), any(), any())).thenReturn(candidates);
+        when(mercadoPago.findLatestPaymentByExternalReference(any())).thenReturn(Optional.empty());
+
+        service.reconcilePendingOrders();
+
+        verify(mercadoPago, times(3)).findLatestPaymentByExternalReference(any());
+        verify(mercadoPago).findLatestPaymentByExternalReference("pack:10");
+        verify(mercadoPago).findLatestPaymentByExternalReference("pack:9");
+        verify(mercadoPago).findLatestPaymentByExternalReference("pack:8");
     }
 
     private static PackOrder stale(long id) {

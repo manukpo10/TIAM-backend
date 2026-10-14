@@ -11,8 +11,16 @@ import com.tiam.subscription.service.MercadoPagoService;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -43,6 +51,12 @@ public class PackOrderReconciliationService {
     private final PackProperties properties;
     private final Clock clock;
 
+    /**
+     * When each order was last asked about (in memory; empty after a restart, which only means one extra round
+     * of questions). Used to ask less and less often about orders that stay unpaid.
+     */
+    private final Map<Long, Instant> lastChecked = new ConcurrentHashMap<>();
+
     @Scheduled(fixedDelayString = "${tiam.pack.reconciliation.interval-ms:900000}")
     public void reconcilePendingOrders() {
         PackProperties.Reconciliation settings = properties.getReconciliation();
@@ -59,13 +73,28 @@ public class PackOrderReconciliationService {
         Instant graceThreshold = now.minus(settings.getGracePeriodMinutes(), ChronoUnit.MINUTES);
         Instant lookbackThreshold = now.minus(settings.getLookbackDays(), ChronoUnit.DAYS);
 
-        List<PackOrder> candidates = orders.findStalePending(PackOrderStatus.PENDING, lookbackThreshold, graceThreshold);
+        // PENDING: the notification may simply never have arrived. FAILED: the buyer may have retried after a
+        // rejection and paid on the same checkout. Keyed by id so an order is never asked about twice per run.
+        Map<Long, PackOrder> byId = new LinkedHashMap<>();
+        orders.findStalePending(PackOrderStatus.PENDING, lookbackThreshold, graceThreshold)
+                .forEach(order -> byId.putIfAbsent(order.getId(), order));
+        orders.findStalePending(PackOrderStatus.FAILED,
+                now.minus(settings.getFailedLookbackDays(), ChronoUnit.DAYS), graceThreshold)
+                .forEach(order -> byId.putIfAbsent(order.getId(), order));
+        lastChecked.keySet().retainAll(byId.keySet()); // forget orders that left the window
+
+        List<PackOrder> candidates = byId.values().stream()
+                .filter(order -> dueForCheck(order, now))
+                .sorted(Comparator.comparing(PackOrderReconciliationService::createdAtOrEpoch).reversed()) // newest first
+                .limit(settings.getMaxPerRun())
+                .collect(Collectors.toCollection(ArrayList::new));
         if (candidates.isEmpty()) {
             return;
         }
 
-        log.info("Pack order reconciliation: inspecting {} stale PENDING order(s)", candidates.size());
+        log.info("Pack order reconciliation: inspecting {} stale order(s) ({} in the window)", candidates.size(), byId.size());
         for (PackOrder order : candidates) {
+            lastChecked.put(order.getId(), now);
             try {
                 reconcileOne(order, graceThreshold);
             } catch (Exception e) {
@@ -73,6 +102,27 @@ public class PackOrderReconciliationService {
                 log.error("Pack order reconciliation failed for order id={}: {}", order.getId(), e.getMessage(), e);
             }
         }
+    }
+
+    /**
+     * Young orders are asked about on every run; an order that has been unpaid for more than an hour only every
+     * hour, and for more than a day only every six hours. Without this, every abandoned cart would cost one
+     * Mercado Pago search every 15 minutes for two weeks.
+     */
+    private boolean dueForCheck(PackOrder order, Instant now) {
+        Instant last = lastChecked.get(order.getId());
+        if (last == null) {
+            return true;
+        }
+        Duration age = Duration.between(createdAtOrEpoch(order), now);
+        Duration interval = age.compareTo(Duration.ofDays(1)) >= 0 ? Duration.ofHours(6)
+                : age.compareTo(Duration.ofHours(1)) >= 0 ? Duration.ofHours(1)
+                : Duration.ZERO;
+        return !last.plus(interval).isAfter(now);
+    }
+
+    private static Instant createdAtOrEpoch(PackOrder order) {
+        return order.getCreatedAt() != null ? order.getCreatedAt() : Instant.EPOCH;
     }
 
     private void reconcileOne(PackOrder order, Instant graceThreshold) throws MPException, MPApiException {

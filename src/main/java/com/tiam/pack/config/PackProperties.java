@@ -80,6 +80,13 @@ public class PackProperties {
         private long gracePeriodMinutes = 10L;
         /** The preference expires after 7 days, so a longer window only wastes Mercado Pago searches. */
         private long lookbackDays = 14L;
+        /**
+         * Rejected orders are re-checked for this long: a buyer can retry and pay on the same checkout after a
+         * rejection, and if that approval's notification is lost nothing else would deliver the order.
+         */
+        private long failedLookbackDays = 3L;
+        /** Most orders asked about per run (newest first), so a pile of abandoned carts cannot flood Mercado Pago. */
+        private int maxPerRun = 100;
     }
 
     @Getter

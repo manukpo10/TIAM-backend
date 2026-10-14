@@ -133,6 +133,8 @@ tiam:
       interval-ms: ${PACK_RECONCILIATION_INTERVAL_MS:900000} # 15 minutes
       grace-period-minutes: 10
       lookback-days: 14
+      failed-lookback-days: 3
+      max-per-run: 100
     email-retry:
       # Re-sends the access email to paid orders that never got it — see PackEmailRetryService.
       enabled: ${PACK_EMAIL_RETRY_ENABLED:true}

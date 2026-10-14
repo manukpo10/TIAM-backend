@@ -88,6 +88,8 @@ class ApplicationYamlTest {
         assertThat(yaml.getProperty("tiam.pack.reconciliation.interval-ms"))
                 .isEqualTo("${PACK_RECONCILIATION_INTERVAL_MS:900000}");
         assertThat(yaml.getProperty("tiam.pack.reconciliation.lookback-days")).isEqualTo("14");
+        assertThat(yaml.getProperty("tiam.pack.reconciliation.failed-lookback-days")).isEqualTo("3");
+        assertThat(yaml.getProperty("tiam.pack.reconciliation.max-per-run")).isEqualTo("100");
         assertThat(yaml.getProperty("tiam.pack.email-retry.interval-ms"))
                 .isEqualTo("${PACK_EMAIL_RETRY_INTERVAL_MS:900000}");
         assertThat(yaml.getProperty("tiam.pack.email-retry.lookback-hours")).isEqualTo("72");
