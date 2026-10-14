@@ -99,7 +99,7 @@ public class PackOrder extends BaseEntity {
 
     /** The external_reference Mercado Pago carries for this order, e.g. {@code pack:42}. */
     public String externalReference() {
-        return "pack:" + getId();
+        return PackExternalReference.of(getId());
     }
 
     /** True while the buyer may download: paid, active and inside the access window. */

@@ -6,6 +6,9 @@ import com.mercadopago.resources.payment.Payment;
 import com.mercadopago.resources.preapproval.Preapproval;
 import com.tiam.challenge.service.ChallengePurchaseService;
 import com.tiam.common.exception.ResourceNotFoundException;
+import com.tiam.pack.domain.PackExternalReference;
+import com.tiam.pack.service.PackOrderService;
+import com.tiam.pack.service.PaymentSnapshot;
 import com.tiam.subscription.config.MercadoPagoProperties;
 import com.tiam.subscription.service.MercadoPagoService;
 import com.tiam.subscription.service.SubscriptionService;
@@ -15,6 +18,7 @@ import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.HexFormat;
 import java.util.Map;
+import java.util.OptionalLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import javax.crypto.Mac;
@@ -43,6 +47,7 @@ public class MercadoPagoWebhookController {
     private final SubscriptionService subscriptionService;
     private final ChallengePurchaseService challengePurchaseService;
     private final MercadoPagoProperties mercadoPagoProperties;
+    private final PackOrderService packOrderService;
 
     /**
      * Receives Mercado Pago IPN/webhook notifications.
@@ -238,6 +243,19 @@ public class MercadoPagoWebhookController {
 
         if (!StringUtils.hasText(externalReference)) {
             log.warn("MP payment {} has no externalReference — cannot correlate", paymentId);
+            return;
+        }
+
+        // Printable-pack orders carry "pack:<id>"; they are routed here, BEFORE the numeric parse below,
+        // which would otherwise log them as invalid and acknowledge them (losing the payment). Anything
+        // that is not "pack:..." keeps taking exactly the Desafio path it always did.
+        if (PackExternalReference.isPackReference(externalReference)) {
+            OptionalLong orderId = PackExternalReference.parse(externalReference);
+            if (orderId.isEmpty()) {
+                log.warn("Invalid pack externalReference={} - cannot correlate", externalReference);
+                return;
+            }
+            packOrderService.onPayment(orderId.getAsLong(), PaymentSnapshot.from(paymentId, payment));
             return;
         }
 

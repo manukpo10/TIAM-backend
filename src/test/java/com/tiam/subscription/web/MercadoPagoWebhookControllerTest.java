@@ -7,12 +7,15 @@ import com.mercadopago.resources.payment.Payment;
 import com.mercadopago.resources.preapproval.Preapproval;
 import com.tiam.challenge.service.ChallengePurchaseService;
 import com.tiam.common.exception.ResourceNotFoundException;
+import com.tiam.pack.service.PackOrderService;
+import com.tiam.pack.service.PaymentSnapshot;
 import com.tiam.subscription.config.MercadoPagoProperties;
 import com.tiam.subscription.service.MercadoPagoService;
 import com.tiam.subscription.service.SubscriptionService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
@@ -49,13 +52,14 @@ class MercadoPagoWebhookControllerTest {
     @Mock SubscriptionService subscriptionService;
     @Mock ChallengePurchaseService challengePurchaseService;
     @Mock MercadoPagoProperties mercadoPagoProperties;
+    @Mock PackOrderService packOrderService;
 
     MercadoPagoWebhookController controller;
 
     @BeforeEach
     void setUp() {
         controller = new MercadoPagoWebhookController(
-                mercadoPagoService, subscriptionService, challengePurchaseService, mercadoPagoProperties);
+                mercadoPagoService, subscriptionService, challengePurchaseService, mercadoPagoProperties, packOrderService);
     }
 
     // --- signature validation ---------------------------------------------------
@@ -311,6 +315,142 @@ class MercadoPagoWebhookControllerTest {
         assertThat(response.getStatusCode().is5xxServerError()).isTrue();
     }
 
+    // --- printable packs: routed by the "pack:" prefix, Desafio untouched -----------------------
+
+    @Test
+    void handleWebhook_packReference_isRoutedToThePackOrderService_notToTheChallenge() throws Exception {
+        givenNoSignatureCheck();
+        when(mercadoPagoService.isConfigured()).thenReturn(true);
+        Payment stubbedPayment = packPayment("pack:42", "approved");
+        when(mercadoPagoService.getPayment("555")).thenReturn(stubbedPayment);
+
+        ResponseEntity<Void> response =
+                controller.handleWebhook(null, "payment", null, "555", null, new MockHttpServletRequest());
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        ArgumentCaptor<PaymentSnapshot> snapshot = ArgumentCaptor.forClass(PaymentSnapshot.class);
+        verify(packOrderService).onPayment(org.mockito.ArgumentMatchers.eq(42L), snapshot.capture());
+        assertThat(snapshot.getValue().paymentId()).isEqualTo("555");
+        assertThat(snapshot.getValue().status()).isEqualTo("approved");
+        assertThat(snapshot.getValue().amount()).isEqualByComparingTo("14990.00");
+        assertThat(snapshot.getValue().currency()).isEqualTo("ARS");
+        verifyNoInteractions(challengePurchaseService);
+    }
+
+    @Test
+    void handleWebhook_packRefundIsRoutedToo_withItsStatus() throws Exception {
+        givenNoSignatureCheck();
+        when(mercadoPagoService.isConfigured()).thenReturn(true);
+        Payment stubbedPayment = packPayment("pack:42", "refunded");
+        when(mercadoPagoService.getPayment("555")).thenReturn(stubbedPayment);
+
+        controller.handleWebhook(null, "payment", null, "555", null, new MockHttpServletRequest());
+
+        ArgumentCaptor<PaymentSnapshot> snapshot = ArgumentCaptor.forClass(PaymentSnapshot.class);
+        verify(packOrderService).onPayment(org.mockito.ArgumentMatchers.eq(42L), snapshot.capture());
+        assertThat(snapshot.getValue().status()).isEqualTo("refunded");
+    }
+
+    @Test
+    void handleWebhook_numericReference_stillGoesToTheChallenge_andNeverToPacks() throws Exception {
+        // Regression: the Desafio's external_reference is the bare purchase id and must keep working.
+        givenNoSignatureCheck();
+        when(mercadoPagoService.isConfigured()).thenReturn(true);
+        Payment stubbedPayment = approvedPayment("42");
+        when(mercadoPagoService.getPayment("555")).thenReturn(stubbedPayment);
+
+        ResponseEntity<Void> response =
+                controller.handleWebhook(null, "payment", null, "555", null, new MockHttpServletRequest());
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        verify(challengePurchaseService).markPaid(42L, "555");
+        verifyNoInteractions(packOrderService);
+    }
+
+    @Test
+    void handleWebhook_numericReferenceRejected_stillMarksTheChallengeFailed_andNeverTouchesPacks() throws Exception {
+        givenNoSignatureCheck();
+        when(mercadoPagoService.isConfigured()).thenReturn(true);
+        Payment stubbedPayment = paymentWithStatus("42", "rejected");
+        when(mercadoPagoService.getPayment("555")).thenReturn(stubbedPayment);
+
+        controller.handleWebhook(null, "payment", null, "555", null, new MockHttpServletRequest());
+
+        verify(challengePurchaseService).markFailed(42L);
+        verifyNoInteractions(packOrderService);
+    }
+
+    @Test
+    void handleWebhook_unknownPrefix_isAcknowledgedAndProcessedByNobody() throws Exception {
+        givenNoSignatureCheck();
+        when(mercadoPagoService.isConfigured()).thenReturn(true);
+        Payment stubbedPayment = paymentWithStatus("curso:42", "approved");
+        when(mercadoPagoService.getPayment("555")).thenReturn(stubbedPayment);
+
+        ResponseEntity<Void> response =
+                controller.handleWebhook(null, "payment", null, "555", null, new MockHttpServletRequest());
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        verifyNoInteractions(challengePurchaseService, packOrderService);
+    }
+
+    @Test
+    void handleWebhook_malformedPackReference_isAcknowledgedAndProcessedByNobody() throws Exception {
+        givenNoSignatureCheck();
+        when(mercadoPagoService.isConfigured()).thenReturn(true);
+        Payment stubbedPayment = paymentWithStatus("pack:abc", "approved");
+        when(mercadoPagoService.getPayment("555")).thenReturn(stubbedPayment);
+
+        ResponseEntity<Void> response =
+                controller.handleWebhook(null, "payment", null, "555", null, new MockHttpServletRequest());
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        verifyNoInteractions(challengePurchaseService, packOrderService);
+    }
+
+    @Test
+    void handleWebhook_packOrderThatDoesNotExist_isAcknowledgedWithoutRetry() throws Exception {
+        givenNoSignatureCheck();
+        when(mercadoPagoService.isConfigured()).thenReturn(true);
+        Payment stubbedPayment = packPayment("pack:999", "approved");
+        when(mercadoPagoService.getPayment("555")).thenReturn(stubbedPayment);
+        doThrow(new ResourceNotFoundException("Pack order not found: 999"))
+                .when(packOrderService).onPayment(org.mockito.ArgumentMatchers.eq(999L), org.mockito.ArgumentMatchers.any());
+
+        ResponseEntity<Void> response =
+                controller.handleWebhook(null, "payment", null, "555", null, new MockHttpServletRequest());
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+    }
+
+    @Test
+    void handleWebhook_packOrderServiceFailure_returns5xxSoMercadoPagoRetries() throws Exception {
+        givenNoSignatureCheck();
+        when(mercadoPagoService.isConfigured()).thenReturn(true);
+        Payment stubbedPayment = packPayment("pack:42", "approved");
+        when(mercadoPagoService.getPayment("555")).thenReturn(stubbedPayment);
+        doThrow(new IllegalStateException("db down"))
+                .when(packOrderService).onPayment(org.mockito.ArgumentMatchers.eq(42L), org.mockito.ArgumentMatchers.any());
+
+        ResponseEntity<Void> response =
+                controller.handleWebhook(null, "payment", null, "555", null, new MockHttpServletRequest());
+
+        assertThat(response.getStatusCode().is5xxServerError()).isTrue();
+    }
+
+    @Test
+    void handleWebhook_packPaymentWithAnInvalidSignature_isRejectedBeforeAnythingIsRead() {
+        when(mercadoPagoProperties.getWebhookSecret()).thenReturn(SECRET);
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("x-signature", "ts=1704908010,v1=deadbeef");
+        request.addHeader("x-request-id", REQUEST_ID);
+
+        ResponseEntity<Void> response = controller.handleWebhook(null, "payment", null, "555", null, request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        verifyNoInteractions(packOrderService, challengePurchaseService, mercadoPagoService);
+    }
+
     // --- fixtures -------------------------------------------------------------
 
     /** Secret unset -> isValidSignature short-circuits to true regardless of headers. */
@@ -320,6 +460,15 @@ class MercadoPagoWebhookControllerTest {
 
     private Payment approvedPayment(String externalReference) {
         return paymentWithStatus(externalReference, "approved");
+    }
+
+    private Payment packPayment(String externalReference, String status) {
+        Payment payment = mock(Payment.class);
+        when(payment.getExternalReference()).thenReturn(externalReference);
+        when(payment.getStatus()).thenReturn(status);
+        when(payment.getTransactionAmount()).thenReturn(new java.math.BigDecimal("14990.00"));
+        when(payment.getCurrencyId()).thenReturn("ARS");
+        return payment;
     }
 
     private Payment paymentWithStatus(String externalReference, String status) {

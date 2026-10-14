@@ -7,10 +7,14 @@ import com.tiam.pack.domain.PackOrder;
 import com.tiam.pack.domain.PackOrderStatus;
 import com.tiam.pack.domain.PackTokens;
 import java.math.BigDecimal;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
+import org.springframework.boot.test.autoconfigure.orm.jpa.TestEntityManager;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
@@ -43,10 +47,11 @@ class PackPersistenceTest {
     }
 
     @Autowired PackOrderRepository orders;
+    @Autowired TestEntityManager em;
 
     @Test
     void order_roundTripsThroughTheRealSchema() {
-        PackOrder saved = orders.saveAndFlush(order("tok-" + PackTokens.newToken()));
+        PackOrder saved = orders.saveAndFlush(order("ana@example.com"));
 
         PackOrder found = orders.findByAccessTokenAndActivoTrue(saved.getAccessToken()).orElseThrow();
 
@@ -60,17 +65,104 @@ class PackPersistenceTest {
 
     @Test
     void findWithLockById_returnsTheOrder() {
-        PackOrder saved = orders.saveAndFlush(order("tok-" + PackTokens.newToken()));
+        PackOrder saved = orders.saveAndFlush(order("lock@example.com"));
 
         assertThat(orders.findWithLockById(saved.getId())).isPresent();
     }
 
-    static PackOrder order(String token) {
+    @Test
+    void findReusable_returnsTheNewestMatchingPendingOrderWithACheckoutLink() {
+        PackOrder older = checkout("reuse@example.com");
+        PackOrder newer = checkout("reuse@example.com");
+        age(older, 5);
+        age(newer, 1);
+        // none of these may match
+        age(checkout("someone-else@example.com"), 1);
+        PackOrder noLink = order("reuse@example.com");
+        orders.saveAndFlush(noLink);
+        PackOrder tooOld = checkout("reuse@example.com");
+        age(tooOld, 40);
+        PackOrder otherEdition = checkout("reuse@example.com");
+        otherEdition.setEdition(PackEdition.PROFESIONALES);
+        orders.saveAndFlush(otherEdition);
+        PackOrder withGames = checkout("reuse@example.com");
+        withGames.setWithGames(true);
+        orders.saveAndFlush(withGames);
+        PackOrder paid = checkout("reuse@example.com");
+        paid.setStatus(PackOrderStatus.PAID);
+        orders.saveAndFlush(paid);
+        em.clear();
+
+        List<PackOrder> reusable = orders.findReusable("reuse@example.com", PackEdition.FAMILIAS, false, false,
+                PackOrderStatus.PENDING, Instant.now().minus(15, ChronoUnit.MINUTES));
+
+        assertThat(reusable).extracting(PackOrder::getId).containsExactly(newer.getId(), older.getId());
+    }
+
+    @Test
+    void countByEmailAndStatusAndCreatedAtAfter_countsOnlyRecentOrdersInThatStatus() {
+        orders.saveAndFlush(order("count@example.com"));
+        orders.saveAndFlush(order("count@example.com"));
+        PackOrder old = orders.saveAndFlush(order("count@example.com"));
+        age(old, 120);
+        PackOrder failed = order("count@example.com");
+        failed.setStatus(PackOrderStatus.FAILED);
+        orders.saveAndFlush(failed);
+        em.clear();
+
+        long pending = orders.countByEmailAndStatusAndCreatedAtAfter("count@example.com", PackOrderStatus.PENDING,
+                Instant.now().minus(1, ChronoUnit.HOURS));
+
+        assertThat(pending).isEqualTo(2);
+    }
+
+    @Test
+    void findStalePending_returnsPendingOrdersWithACheckoutInsideTheWindow() {
+        PackOrder stale = checkout("stale@example.com");
+        age(stale, 60);
+        PackOrder tooRecent = checkout("stale@example.com");
+        age(tooRecent, 2);
+        PackOrder tooOld = checkout("stale@example.com");
+        age(tooOld, 60 * 24 * 30);
+        PackOrder neverReachedMp = orders.saveAndFlush(order("stale@example.com"));
+        age(neverReachedMp, 60);
+        PackOrder paid = checkout("stale@example.com");
+        paid.setStatus(PackOrderStatus.PAID);
+        orders.saveAndFlush(paid);
+        age(paid, 60);
+        em.clear();
+        Instant now = Instant.now();
+
+        List<PackOrder> found = orders.findStalePending(PackOrderStatus.PENDING,
+                now.minus(14, ChronoUnit.DAYS), now.minus(10, ChronoUnit.MINUTES));
+
+        assertThat(found).extracting(PackOrder::getId).contains(stale.getId())
+                .doesNotContain(tooRecent.getId(), tooOld.getId(), neverReachedMp.getId(), paid.getId());
+    }
+
+    private PackOrder checkout(String email) {
+        PackOrder order = order(email);
+        order.setInitPoint("https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=X");
+        order.setMpPreferenceId("X");
+        return orders.saveAndFlush(order);
+    }
+
+    /** Moves created_at back in time (the column is filled by Hibernate on insert). */
+    private void age(PackOrder order, long minutes) {
+        em.getEntityManager()
+                .createNativeQuery("update pack_orders set created_at = now() - make_interval(mins => ?1) where id = ?2")
+                .setParameter(1, (int) minutes)
+                .setParameter(2, order.getId())
+                .executeUpdate();
+        em.clear();
+    }
+
+    static PackOrder order(String email) {
         PackOrder order = new PackOrder();
-        order.setAccessToken(token.substring(0, Math.min(token.length(), 64)));
+        order.setAccessToken(PackTokens.newToken());
         order.setEdition(PackEdition.FAMILIAS);
         order.setBuyerName("Ana");
-        order.setEmail("ana@example.com");
+        order.setEmail(email);
         order.setPackAmount(new BigDecimal("14990.00"));
         order.setTotalAmount(new BigDecimal("14990.00"));
         return order;

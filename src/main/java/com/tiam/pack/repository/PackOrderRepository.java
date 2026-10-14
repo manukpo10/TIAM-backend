@@ -38,4 +38,16 @@ public interface PackOrderRepository extends JpaRepository<PackOrder, Long> {
             @Param("since") Instant since);
 
     long countByEmailAndStatusAndCreatedAtAfter(String email, PackOrderStatus status, Instant since);
+
+    /**
+     * Orders whose payment notification may have been lost: stuck in {@code status}, created inside
+     * [from, to], and that actually reached Mercado Pago (an order with no init_point never had a checkout,
+     * so there is nothing to look up). Used by {@code PackOrderReconciliationService}.
+     */
+    @Query("select o from PackOrder o where o.status = :status and o.activo = true "
+            + "and o.initPoint is not null and o.createdAt between :from and :to order by o.createdAt")
+    List<PackOrder> findStalePending(
+            @Param("status") PackOrderStatus status,
+            @Param("from") Instant from,
+            @Param("to") Instant to);
 }

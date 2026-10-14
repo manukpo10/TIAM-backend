@@ -213,6 +213,91 @@ public class ChallengePurchaseService {
         return toGrantResponse(purchase);
     }
 
+    /**
+     * Grants the next unpaid month to a phone as part of a printable-pack order that included the games
+     * add-on. Modelled on {@link #grantManualPurchase}: a PAID purchase with {@code mpPaymentId} left null
+     * (the Mercado Pago payment belongs to the pack order, there is no payment "of the Desafío"), and the
+     * same purchase-date-starts-now day-unlock math.
+     *
+     * <p>Two consequences of that null payment id are deliberate: no {@link ChallengePurchasePaidEvent}
+     * is published and the access-email retry job (which only picks purchases with a payment id) ignores
+     * it, so the buyer gets ONE email, the pack one, which already carries this month's link.
+     *
+     * <p>Which month: the lowest one on sale this phone has not paid, under the same per-phone lock as
+     * {@link #createPurchase}. When there is none the result is EMPTY rather than an exception: this runs
+     * inside the pack order's payment transaction, and an exception crossing this transactional boundary
+     * would mark that transaction rollback-only and undo a payment that really happened. The caller decides
+     * what to do with an order that was paid but cannot be fully served.
+     *
+     * <p>Not idempotent by itself: the pack order remembers the purchase it created
+     * ({@code pack_orders.challenge_purchase_id}) and never calls this twice for one order.
+     *
+     * @throws BadRequestException if the phone is unusable (the pack checkout validates it up front)
+     */
+    @Transactional
+    public Optional<ChallengePurchase> grantBundledMonth(String buyerName, String rawPhone, String email) {
+        String normalizedPhone = PhoneNumberUtil.normalize(rawPhone);
+        if (normalizedPhone.isEmpty()) {
+            throw new BadRequestException("A valid phone number is required to grant a Desafío month");
+        }
+        Object lock = autoAssignLocksByPhone.computeIfAbsent(normalizedPhone, key -> new Object());
+        synchronized (lock) {
+            Optional<Integer> challengeMonth = firstUnpaidMonth(paidMonthsFor(normalizedPhone));
+            if (challengeMonth.isEmpty()) {
+                log.warn("Cannot grant a bundled challenge month: phone={} already has every month on sale", normalizedPhone);
+                return Optional.empty();
+            }
+
+            ChallengePurchase purchase = new ChallengePurchase();
+            purchase.setBuyerName(buyerName);
+            purchase.setPhone(normalizedPhone);
+            purchase.setEmail(email);
+            purchase.setStatus(ChallengePurchaseStatus.PAID);
+            purchase.setAccessToken(UUID.randomUUID().toString());
+            purchase.setChallengeMonth(challengeMonth.get());
+            purchase.setPurchaseDate(Instant.now());
+            purchase = challengePurchaseRepository.save(purchase);
+
+            log.info("Granted challenge month={} to phone={} as part of a pack order (purchase id={})",
+                    challengeMonth.get(), normalizedPhone, purchase.getId());
+            return Optional.of(purchase);
+        }
+    }
+
+    /**
+     * Closes a purchase (soft delete: {@code activo = false}); every access lookup filters on it. Used when
+     * the pack order that bundled it is refunded or charged back. Unknown ids are ignored.
+     */
+    @Transactional
+    public void deactivatePurchase(Long purchaseId) {
+        challengePurchaseRepository.findById(purchaseId).ifPresent(purchase -> {
+            purchase.setActivo(false);
+            challengePurchaseRepository.save(purchase);
+            log.info("Challenge purchase id={} deactivated", purchaseId);
+        });
+    }
+
+    /**
+     * The buyer's personal Desafío link for a PAID, active purchase, or empty. Read by the pack access
+     * email and the downloads page so they can show "open my month of games".
+     */
+    @Transactional(readOnly = true)
+    public Optional<String> findAccessLinkIfActive(Long purchaseId) {
+        if (purchaseId == null) {
+            return Optional.empty();
+        }
+        return challengePurchaseRepository.findById(purchaseId)
+                .filter(p -> p.isActivo() && p.getStatus() == ChallengePurchaseStatus.PAID)
+                .map(p -> {
+                    String base = whatsAppProperties.getDesafioPlayBaseUrl();
+                    base = base == null ? "" : base.strip();
+                    while (base.endsWith("/")) {
+                        base = base.substring(0, base.length() - 1);
+                    }
+                    return base + "/" + p.getAccessToken();
+                });
+    }
+
     private AdminGrantPurchaseResponse toGrantResponse(ChallengePurchase purchase) {
         String link = whatsAppProperties.getDesafioPlayBaseUrl() + "/" + purchase.getAccessToken();
         return new AdminGrantPurchaseResponse(
@@ -253,13 +338,17 @@ public class ChallengePurchaseService {
      */
     @Transactional(readOnly = true)
     public boolean hasMonthAvailable(String rawPhone) {
-        Set<Integer> paidMonths = paidMonthsFor(rawPhone);
+        return firstUnpaidMonth(paidMonthsFor(rawPhone)).isPresent();
+    }
+
+    /** The lowest month on sale not in {@code paidMonths}, or empty when every month on sale is taken. */
+    private static Optional<Integer> firstUnpaidMonth(Set<Integer> paidMonths) {
         for (int month = 1; month <= MONTHS_ON_SALE; month++) {
             if (!paidMonths.contains(month)) {
-                return true;
+                return Optional.of(month);
             }
         }
-        return false;
+        return Optional.empty();
     }
 
     private Set<Integer> paidMonthsFor(String rawPhone) {
