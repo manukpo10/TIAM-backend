@@ -31,8 +31,9 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * <p>The token is the credential, so every "no" is the SAME {@link ResourceNotFoundException} (malformed,
  * unknown, inactive, revoked, expired, a file the order did not buy) and its message never repeats the token.
- * The one exception is deliberate: a known order that is still PENDING (or FAILED) says so, because the
- * thank-you page polls it while the payment confirms; that reveals nothing to someone without the token.
+ * The one exception is deliberate: a known order that is still PENDING, FAILED or in REVIEW says so (with its
+ * edition only), because the thank-you page polls it while the payment confirms; that reveals nothing to someone
+ * without the token.
  *
  * <p>Links are issued by POST, never by a GET that email scanners and link previewers could trigger, and each
  * one is logged and counted against two caps (per 24 h and in total) that make sharing the token uneconomical.
@@ -55,11 +56,15 @@ public class PackDownloadService {
     public PackOrderResponse view(String token) {
         PackOrder order = findVisibleOrder(token);
         switch (order.getStatus()) {
-            case PENDING, REVIEW -> {
-                return PackOrderResponse.withoutFiles("PENDING");
+            case PENDING -> {
+                return PackOrderResponse.withoutFiles("PENDING", order.getEdition().slug());
+            }
+            case REVIEW -> {
+                // Honest to the buyer: a payment arrived but a person has to check it (the owner was told).
+                return PackOrderResponse.withoutFiles("REVIEW", order.getEdition().slug());
             }
             case FAILED -> {
-                return PackOrderResponse.withoutFiles("FAILED");
+                return PackOrderResponse.withoutFiles("FAILED", order.getEdition().slug());
             }
             default -> {
                 // PAID: fall through to the full body, after the access window check below
@@ -76,7 +81,7 @@ public class PackDownloadService {
                 ? new PackOrderResponse.Games(challengePurchases.findAccessLinkIfActive(order.getChallengePurchaseId()).orElse(null))
                 : null;
         return PackOrderResponse.paid(firstName(order.getBuyerName()), order.getEdition().slug(), items, games,
-                order.getAccessExpiresAt());
+                order.getAccessExpiresAt(), order.getTotalAmount());
     }
 
     @Transactional

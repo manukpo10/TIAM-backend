@@ -1,0 +1,87 @@
+{
+  "id": 1234567890,
+  "date_created": "2026-10-14T10:15:30.123-03:00",
+  "date_approved": "2026-10-14T10:15:31.000-03:00",
+  "date_last_updated": "2026-10-14T10:15:31.000-03:00",
+  "money_release_date": "2026-10-28T10:15:31.000-03:00",
+  "operation_type": "regular_payment",
+  "issuer_id": "24",
+  "payment_method_id": "visa",
+  "payment_type_id": "credit_card",
+  "payment_method": {
+    "id": "visa",
+    "type": "credit_card",
+    "issuer_id": "24"
+  },
+  "status": "refunded",
+  "status_detail": "refunded",
+  "currency_id": "ARS",
+  "description": "Pack TIAM - Edición Familias",
+  "live_mode": true,
+  "sponsor_id": null,
+  "authorization_code": "301299",
+  "taxes_amount": 0,
+  "shipping_amount": 0,
+  "collector_id": 112233445,
+  "payer": {
+    "email": "ana@example.com",
+    "identification": {
+      "number": "30111222",
+      "type": "DNI"
+    },
+    "type": null,
+    "id": "998877"
+  },
+  "metadata": {},
+  "additional_info": {
+    "items": [
+      {
+        "id": "pack-familias",
+        "title": "Pack TIAM - Edición Familias",
+        "quantity": "1",
+        "unit_price": "14990.0"
+      }
+    ]
+  },
+  "order": {
+    "id": "5000000001",
+    "type": "mercadopago"
+  },
+  "external_reference": "pack:42",
+  "transaction_amount": 14990,
+  "transaction_amount_refunded": 14990,
+  "coupon_amount": 0,
+  "installments": 1,
+  "transaction_details": {
+    "net_received_amount": 14365.9,
+    "total_paid_amount": 14990,
+    "overpaid_amount": 0,
+    "installment_amount": 14990
+  },
+  "fee_details": [
+    {
+      "type": "mercadopago_fee",
+      "amount": 624.1,
+      "fee_payer": "collector"
+    }
+  ],
+  "charges_details": [],
+  "captured": true,
+  "binary_mode": false,
+  "statement_descriptor": "TIAM",
+  "notification_url": "https://api.tiamdigital.com/webhooks/mercadopago",
+  "refunds": [
+    {
+      "id": 7001,
+      "payment_id": 1234567890,
+      "amount": 14990,
+      "source": {
+        "name": "TIAM",
+        "type": "collector"
+      },
+      "date_created": "2026-10-15T09:00:00.000-03:00",
+      "status": "approved"
+    }
+  ],
+  "processing_mode": "aggregator"
+}

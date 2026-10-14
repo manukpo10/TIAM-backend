@@ -43,8 +43,8 @@ public class PackOrderController {
     private final ClientIpResolver clientIp;
 
     /**
-     * The downloads / thank-you page. PAID with a valid access window returns the full body; PENDING and
-     * FAILED return only their status; anything else (unknown, revoked, expired) is one uniform 404.
+     * The downloads / thank-you page. PAID with a valid access window returns the full body; PENDING, FAILED
+     * and REVIEW return only their status and edition; anything else (unknown, revoked, expired) is one uniform 404.
      */
     @GetMapping("/{token}")
     public ResponseEntity<ApiResponse<PackOrderResponse>> get(@PathVariable String token, HttpServletRequest http) {
@@ -77,13 +77,17 @@ public class PackOrderController {
         return tokenResponse(new OrderStatusResponse(publicStatus(status)));
     }
 
-    /** What a buyer's browser may learn: REVIEW looks like PENDING ("we are confirming your payment"). */
+    /**
+     * What a buyer's browser may learn. REVIEW is shown as such (a payment arrived and a person must check it),
+     * because pretending it is "still confirming" leaves the buyer waiting for an email that may never come.
+     * REVOKED can only appear if the payment just confirmed was refunded; it reads as "could not confirm".
+     */
     static String publicStatus(PackOrderStatus status) {
         return switch (status) {
             case PAID -> "PAID";
-            case FAILED -> "FAILED";
-            case PENDING, REVIEW -> "PENDING";
-            case REVOKED -> "PENDING"; // never reached: revoked orders answer 404 before this point
+            case PENDING -> "PENDING";
+            case REVIEW -> "REVIEW";
+            case FAILED, REVOKED -> "FAILED";
         };
     }
 

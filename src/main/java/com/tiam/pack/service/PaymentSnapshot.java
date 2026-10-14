@@ -18,7 +18,14 @@ import java.math.BigDecimal;
 public record PaymentSnapshot(String paymentId, String status, BigDecimal amount, String currency,
         String externalReference) {
 
-    public static PaymentSnapshot from(String paymentId, Payment payment) {
+    /**
+     * @param requestedId the id text that asked for this payment (a notification or the browser). Used only when
+     *                    Mercado Pago's own answer carries no id: otherwise the id is the one Mercado Pago
+     *                    reports, because "0123" and "123" would otherwise be two different payments to the
+     *                    unique-payment check and raise a false "duplicate payment" alert.
+     */
+    public static PaymentSnapshot from(String requestedId, Payment payment) {
+        String paymentId = payment.getId() != null && payment.getId() > 0 ? String.valueOf(payment.getId()) : requestedId;
         return new PaymentSnapshot(paymentId, payment.getStatus(), payment.getTransactionAmount(),
                 payment.getCurrencyId(), payment.getExternalReference());
     }

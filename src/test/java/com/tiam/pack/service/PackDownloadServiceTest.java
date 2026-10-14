@@ -66,6 +66,7 @@ class PackDownloadServiceTest {
         PackOrderResponse view = service.view(token);
 
         assertThat(view.status()).isEqualTo("PAID");
+        assertThat(view.total()).isEqualByComparingTo("14990");
         assertThat(view.firstName()).isEqualTo("Ana");
         assertThat(view.edition()).isEqualTo("familias");
         assertThat(view.expiresAt()).isEqualTo(NOW.plus(Duration.ofDays(90)));
@@ -123,16 +124,23 @@ class PackDownloadServiceTest {
         PackOrderResponse view = service.view(token);
 
         assertThat(view.status()).isEqualTo("PENDING");
+        assertThat(view.edition()).isEqualTo("familias");
+        assertThat(view.total()).isNull();
         assertThat(view.items()).isEmpty();
         assertThat(view.firstName()).isNull();
         assertThat(view.expiresAt()).isNull();
     }
 
     @Test
-    void view_anOrderHeldForReview_looksPendingToTheBuyer() {
+    void view_anOrderHeldForReview_isHonestlyReportedAsReview_withoutAnyFiles() {
         givenOrder(PackOrderStatus.REVIEW, 90);
 
-        assertThat(service.view(token).status()).isEqualTo("PENDING");
+        PackOrderResponse view = service.view(token);
+
+        assertThat(view.status()).isEqualTo("REVIEW");
+        assertThat(view.edition()).isEqualTo("familias");
+        assertThat(view.items()).isEmpty();
+        assertThat(view.expiresAt()).isNull();
     }
 
     @Test
@@ -355,6 +363,7 @@ class PackDownloadServiceTest {
         order.setBuyerName("ana gómez");
         order.setEmail("ana@example.com");
         order.setCatalogVersion("v1");
+        order.setTotalAmount(new java.math.BigDecimal("14990.00"));
         order.setPaidAt(NOW.minus(Duration.ofDays(1)));
         order.setAccessExpiresAt(NOW.plus(Duration.ofDays(accessDaysLeft)));
         when(orders.findByAccessTokenAndActivoTrue(token)).thenReturn(Optional.of(order));

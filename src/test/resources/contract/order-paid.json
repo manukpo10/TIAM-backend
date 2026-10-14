@@ -1,0 +1,32 @@
+{
+  "success": true,
+  "data": {
+    "status": "PAID",
+    "firstName": "Ana",
+    "edition": "familias",
+    "items": [
+      {
+        "code": "PACK",
+        "title": "Pack imprimible - Edición Familias",
+        "files": [
+          { "key": "pack-completo-a4", "label": "Pack completo (1 PDF)", "paper": "A4", "sizeMb": 19 },
+          { "key": "cuadernillos-a4", "label": "Cuadernillos sueltos (ZIP)", "paper": "A4", "sizeMb": 32 },
+          { "key": "pack-completo-carta", "label": "Pack completo (1 PDF)", "paper": "Carta", "sizeMb": 19 },
+          { "key": "cuadernillos-carta", "label": "Cuadernillos sueltos (ZIP)", "paper": "Carta", "sizeMb": 32 }
+        ]
+      },
+      {
+        "code": "EXTRA",
+        "title": "Cuadernillo extra",
+        "files": [
+          { "key": "extra-a4", "label": "Cuadernillo extra (PDF)", "paper": "A4", "sizeMb": 7 },
+          { "key": "extra-carta", "label": "Cuadernillo extra (PDF)", "paper": "Carta", "sizeMb": 7 }
+        ]
+      }
+    ],
+    "games": { "link": "https://tiamdigital.com/desafio/abc123" },
+    "expiresAt": "2027-01-12T15:00:00Z",
+    "total": 29980
+  },
+  "message": null
+}

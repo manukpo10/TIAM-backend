@@ -1,0 +1,13 @@
+{
+  "success": true,
+  "data": {
+    "status": "FAILED",
+    "firstName": null,
+    "edition": "familias",
+    "items": [],
+    "games": null,
+    "expiresAt": null,
+    "total": null
+  },
+  "message": null
+}

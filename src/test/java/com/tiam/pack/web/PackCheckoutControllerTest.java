@@ -81,6 +81,15 @@ class PackCheckoutControllerTest {
     }
 
     @Test
+    void theOldHoneypotName_isJustAnUnknownFieldNow_soAnAutofilledWebsiteCannotSwallowARealPurchase() throws Exception {
+        when(checkoutService.start(any())).thenReturn(MP);
+
+        mvc.perform(form().param("web", "https://my-saved-website.example.com"))
+                .andExpect(status().isSeeOther())
+                .andExpect(header().string("Location", MP));
+    }
+
+    @Test
     void englishFieldNames_areAcceptedAsAliases() throws Exception {
         when(checkoutService.start(any())).thenReturn(MP);
 
@@ -138,7 +147,7 @@ class PackCheckoutControllerTest {
 
     @Test
     void filledHoneypot_createsNothing_andJustReturnsToTheLanding() throws Exception {
-        mvc.perform(form().param("web", "http://spam.example.com"))
+        mvc.perform(form().param("hp_contacto", "http://spam.example.com"))
                 .andExpect(status().isSeeOther())
                 .andExpect(header().string("Location", LANDING + "/pack/familias#comprar"));
 
@@ -149,7 +158,7 @@ class PackCheckoutControllerTest {
     void emptyHoneypot_isAnOrdinaryBuyer() throws Exception {
         when(checkoutService.start(any())).thenReturn(MP);
 
-        mvc.perform(form().param("web", "")).andExpect(status().isSeeOther()).andExpect(header().string("Location", MP));
+        mvc.perform(form().param("hp_contacto", "")).andExpect(status().isSeeOther()).andExpect(header().string("Location", MP));
     }
 
     @Test

@@ -33,8 +33,12 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class PackCheckoutController {
 
-    /** Honeypot: invisible to people, tempting to bots. */
-    private static final String HONEYPOT_FIELD = "web";
+    /**
+     * Honeypot: invisible to people, tempting to bots. Named so that browser autofill does not recognise it (the
+     * old name, "web", is exactly what Chrome fills with a saved website and would silently swallow a real
+     * purchase: the buyer would land back on the page with no message and no order).
+     */
+    static final String HONEYPOT_FIELD = "hp_contacto";
 
     private final PackCheckoutService checkoutService;
     private final PackOriginPolicy originPolicy;

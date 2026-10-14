@@ -1,0 +1,8 @@
+{
+  "success": true,
+  "data": {
+    "url": "https://example.r2.cloudflarestorage.com/packs/v1/familias/pack-completo-a4.pdf?X-Amz-Expires=300",
+    "expiresInSeconds": 300
+  },
+  "message": null
+}

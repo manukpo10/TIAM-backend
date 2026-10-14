@@ -66,12 +66,21 @@ class PackOrderControllerTest {
     }
 
     @Test
-    void confirm_neverExposesInternalStates() throws Exception {
+    void confirm_aPaymentHeldForReview_isShownAsReview_notDisguisedAsPending() throws Exception {
         when(confirmationService.confirm(token, "987654")).thenReturn(PackOrderStatus.REVIEW);
 
         mvc.perform(confirm(token, "{\"paymentId\":\"987654\"}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.status").value("PENDING"));
+                .andExpect(jsonPath("$.data.status").value("REVIEW"));
+    }
+
+    @Test
+    void confirm_aRefundedPayment_neverLeaksTheInternalRevokedState() throws Exception {
+        when(confirmationService.confirm(token, "987654")).thenReturn(PackOrderStatus.REVOKED);
+
+        mvc.perform(confirm(token, "{\"paymentId\":\"987654\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("FAILED"));
     }
 
     @Test
@@ -153,7 +162,7 @@ class PackOrderControllerTest {
         PackOrderResponse view = PackOrderResponse.paid("Ana", "familias",
                 java.util.List.of(new PackOrderResponse.Item("PACK", "Pack imprimible - Edición Familias",
                         java.util.List.of(new PackOrderResponse.FileInfo("pack-completo-a4", "Pack completo (1 PDF)", "A4", 19)))),
-                null, java.time.Instant.parse("2027-01-12T15:00:00Z"));
+                null, java.time.Instant.parse("2027-01-12T15:00:00Z"), new java.math.BigDecimal("14990"));
         when(downloadService.view(token)).thenReturn(view);
 
         mvc.perform(get("/packs/orders/" + token))
@@ -166,6 +175,7 @@ class PackOrderControllerTest {
                 .andExpect(jsonPath("$.data.items[0].files[0].key").value("pack-completo-a4"))
                 .andExpect(jsonPath("$.data.items[0].files[0].paper").value("A4"))
                 .andExpect(jsonPath("$.data.items[0].files[0].sizeMb").value(19))
+                .andExpect(jsonPath("$.data.total").value(14990))
                 .andExpect(jsonPath("$.data.games").doesNotExist())
                 .andExpect(header().string("Cache-Control", org.hamcrest.Matchers.containsString("no-store")))
                 .andExpect(header().string("Referrer-Policy", "no-referrer"));
@@ -173,13 +183,36 @@ class PackOrderControllerTest {
 
     @Test
     void get_pendingOrder_returnsOnlyItsStatus() throws Exception {
-        when(downloadService.view(token)).thenReturn(PackOrderResponse.withoutFiles("PENDING"));
+        when(downloadService.view(token)).thenReturn(PackOrderResponse.withoutFiles("PENDING", "familias"));
 
         mvc.perform(get("/packs/orders/" + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("PENDING"))
                 .andExpect(jsonPath("$.data.items").isEmpty())
+                .andExpect(jsonPath("$.data.edition").value("familias"))
+                .andExpect(jsonPath("$.data.total").doesNotExist())
                 .andExpect(jsonPath("$.data.firstName").doesNotExist());
+    }
+
+    @Test
+    void get_sharedAddressesAreNotStarved_eachTokenHasItsOwnBucket() throws Exception {
+        properties.getRateLimits().setTokenCallsPerIp(1);
+        when(downloadService.view(any())).thenReturn(PackOrderResponse.withoutFiles("PENDING", "familias"));
+
+        for (int i = 0; i < 20; i++) { // twenty buyers behind one carrier address, one page each
+            mvc.perform(get("/packs/orders/" + PackTokens.newToken())).andExpect(status().isOk());
+        }
+    }
+
+    @Test
+    void get_aSingleAddressStillHasAnOverallCeiling() throws Exception {
+        properties.getRateLimits().setTokenCallsPerIpTotal(3);
+        when(downloadService.view(any())).thenReturn(PackOrderResponse.withoutFiles("PENDING", "familias"));
+
+        for (int i = 0; i < 3; i++) {
+            mvc.perform(get("/packs/orders/" + PackTokens.newToken())).andExpect(status().isOk());
+        }
+        mvc.perform(get("/packs/orders/" + PackTokens.newToken())).andExpect(status().isTooManyRequests());
     }
 
     @Test
@@ -196,7 +229,7 @@ class PackOrderControllerTest {
     @Test
     void get_isRateLimitedPerIp() throws Exception {
         properties.getRateLimits().setTokenCallsPerIp(1);
-        when(downloadService.view(any())).thenReturn(PackOrderResponse.withoutFiles("PENDING"));
+        when(downloadService.view(any())).thenReturn(PackOrderResponse.withoutFiles("PENDING", "familias"));
 
         mvc.perform(get("/packs/orders/" + token)).andExpect(status().isOk());
         mvc.perform(get("/packs/orders/" + token)).andExpect(status().isTooManyRequests());
