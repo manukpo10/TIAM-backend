@@ -93,7 +93,14 @@ public class PackOrderReconciliationService {
         }
 
         log.info("Pack order reconciliation: inspecting {} stale order(s) ({} in the window)", candidates.size(), byId.size());
+        Instant started = clock.instant();
         for (PackOrder order : candidates) {
+            if (Duration.between(started, clock.instant()).toSeconds() >= settings.getMaxRunSeconds()) {
+                // Each Mercado Pago call can wait for its own timeout; do not let one run hold a scheduler thread for
+                // minutes. The orders not reached are not marked as checked, so the next run starts with them.
+                log.warn("Pack order reconciliation: time budget of {}s spent, stopping early", settings.getMaxRunSeconds());
+                break;
+            }
             lastChecked.put(order.getId(), now);
             try {
                 reconcileOne(order, graceThreshold);

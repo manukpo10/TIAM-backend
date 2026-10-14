@@ -94,6 +94,8 @@ public class PackProperties {
         private long failedLookbackDays = 3L;
         /** Most orders asked about per run (newest first), so a pile of abandoned carts cannot flood Mercado Pago. */
         private int maxPerRun = 100;
+        /** A run stops asking Mercado Pago after this long, so a slow or failing API cannot hog a scheduler thread. */
+        private int maxRunSeconds = 120;
     }
 
     @Getter

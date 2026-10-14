@@ -253,6 +253,30 @@ class PackOrderReconciliationServiceTest {
         verify(mercadoPago).findLatestPaymentByExternalReference("pack:8");
     }
 
+    @Test
+    void aRunStopsWhenItsTimeBudgetIsSpent_soASlowMercadoPagoCannotKeepTheSchedulerBusyForMinutes() throws Exception {
+        properties.getReconciliation().setMaxRunSeconds(100);
+        when(mercadoPago.isConfigured()).thenReturn(true);
+        List<PackOrder> candidates = new java.util.ArrayList<>();
+        for (long id = 1; id <= 5; id++) {
+            PackOrder order = stale(id);
+            order.setCreatedAt(NOW.minus(Duration.ofHours(1)).minusSeconds(100 - id));
+            candidates.add(order);
+        }
+        when(orders.findStalePending(eq(PackOrderStatus.PENDING), any(), any())).thenReturn(candidates);
+        when(mercadoPago.findLatestPaymentByExternalReference(any())).thenAnswer(invocation -> {
+            clock.advance(Duration.ofSeconds(50)); // every call to a struggling Mercado Pago takes 50 s
+            return Optional.empty();
+        });
+
+        service.reconcilePendingOrders();
+
+        verify(mercadoPago, times(2)).findLatestPaymentByExternalReference(any()); // 50 s + 50 s = the budget
+        // the ones not reached are not marked as checked: the next run picks them up
+        service.reconcilePendingOrders();
+        verify(mercadoPago, times(4)).findLatestPaymentByExternalReference(any());
+    }
+
     private static PackOrder stale(long id) {
         PackOrder order = new PackOrder();
         order.setId(id);

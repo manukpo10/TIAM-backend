@@ -44,6 +44,12 @@ spring:
       max-file-size: 5MB
       max-request-size: 5MB
   task:
+    scheduling:
+      # The pack and Desafio jobs (reconciliation, email retry) used to share ONE thread: a slow Mercado Pago
+      # holding the pack reconciliation starved the Desafio's. Four threads keep them independent.
+      pool:
+        size: ${SCHEDULER_POOL_SIZE:4}
+      thread-name-prefix: tiam-sched-
     execution:
       # @Async work (the after-payment access email) gets up to 20s to finish on
       # SIGTERM instead of being interrupted mid-send during a Render deploy.
@@ -150,6 +156,7 @@ tiam:
       lookback-days: 14
       failed-lookback-days: 3
       max-per-run: 100
+      max-run-seconds: 120
     email-retry:
       # Re-sends the access email to paid orders that never got it — see PackEmailRetryService.
       enabled: ${PACK_EMAIL_RETRY_ENABLED:true}
