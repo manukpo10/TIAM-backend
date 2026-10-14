@@ -17,6 +17,7 @@ import com.mercadopago.net.MPSearchRequest;
 import com.mercadopago.resources.payment.Payment;
 import com.mercadopago.resources.preapproval.Preapproval;
 import com.mercadopago.resources.preference.Preference;
+import com.tiam.pack.config.PackUrls;
 import com.tiam.subscription.config.ChallengeProperties;
 import com.tiam.subscription.config.MercadoPagoProperties;
 import com.tiam.subscription.config.PlansProperties;
@@ -193,12 +194,19 @@ public class MercadoPagoService {
         PreferenceRequest.PreferenceRequestBuilder builder = PreferenceRequest.builder()
                 .items(items)
                 .backUrls(backUrls)
-                .autoReturn("approved")
                 .externalReference(spec.externalReference())
                 .expires(true)
                 .expirationDateFrom(spec.expiresFrom())
                 .expirationDateTo(spec.expiresAt())
                 .statementDescriptor(spec.statementDescriptor());
+
+        // Mercado Pago answers 400 to auto_return=approved when the back_url is not a public https address (a
+        // local test on http://localhost, only possible with PACK_DEV_MODE). Production always has public https:
+        // the sales gate guarantees it. Without auto_return the buyer clicks "Volver al sitio" and lands on the
+        // same back_url.
+        if (PackUrls.isPublicHttps(spec.backUrl())) {
+            builder.autoReturn("approved");
+        }
 
         PreferencePayerRequest.PreferencePayerRequestBuilder payer = PreferencePayerRequest.builder()
                 .email(spec.payerEmail());

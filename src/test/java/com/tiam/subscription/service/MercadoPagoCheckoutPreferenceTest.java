@@ -68,6 +68,21 @@ class MercadoPagoCheckoutPreferenceTest {
     }
 
     @Test
+    void aLocalhostReturnUrl_leavesAutoReturnOut_becauseMercadoPagoRejectsThePreferenceOtherwise() {
+        // Found in the local live test (PACK_DEV_MODE, landing on http://localhost): with auto_return=approved and a
+        // non-public back_url the Mercado Pago API answers 400. Without auto_return the buyer clicks "Volver al sitio".
+        CheckoutPreferenceSpec local = new CheckoutPreferenceSpec(List.of(line()), "ana@example.com", "Ana",
+                "pack:42", "http://localhost:5180/pack/gracias?o=TOKEN", FROM, TO, "TIAM");
+
+        PreferenceRequest request = service.buildCheckoutPreferenceRequest(local);
+
+        assertThat(request.getAutoReturn()).isNull();
+        assertThat(request.getBackUrls().getSuccess()).isEqualTo("http://localhost:5180/pack/gracias?o=TOKEN");
+        assertThat(request.getBackUrls().getFailure()).isEqualTo("http://localhost:5180/pack/gracias?o=TOKEN");
+        assertThat(request.getBackUrls().getPending()).isEqualTo("http://localhost:5180/pack/gracias?o=TOKEN");
+    }
+
+    @Test
     void notificationUrlComesFromTheSameSettingAsTheDesafio() {
         PreferenceRequest request = service.buildCheckoutPreferenceRequest(spec(line()));
 
