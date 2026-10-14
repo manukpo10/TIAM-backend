@@ -67,10 +67,11 @@ public class PackOrderEmailService {
 
     /**
      * True when a real provider is live but the downloads base (PACK_DOWNLOAD_BASE_URL) is empty, localhost
-     * or not https: every email would carry a link the buyer cannot open, so sending is held back.
+     * or not https: every email would carry a link the buyer cannot open, so sending is held back. The one
+     * exception is a local test with PACK_DEV_MODE=true (ignored in prod), which may use an http://localhost base.
      */
     public boolean isBlockedByUnusableLinkBase() {
-        return emailSender.isEnabled() && !composer.hasPublicDownloadBase();
+        return emailSender.isEnabled() && !composer.hasUsableDownloadBase();
     }
 
     @EventListener(ApplicationReadyEvent.class)

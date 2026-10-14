@@ -76,7 +76,7 @@ public class PackAccessResender {
             log.warn("Pack access re-send skipped: no email provider is configured (RESEND_API_KEY / EMAIL_FROM)");
             return false;
         }
-        if (!composer.hasPublicDownloadBase()) {
+        if (!composer.hasUsableDownloadBase()) {
             log.error("Pack access re-send skipped: PACK_DOWNLOAD_BASE_URL is \"{}\" (empty, localhost or not https)",
                     composer.downloadBase());
             return false;

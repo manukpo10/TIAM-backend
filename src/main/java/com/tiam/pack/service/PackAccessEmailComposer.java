@@ -3,6 +3,8 @@ package com.tiam.pack.service;
 import com.tiam.challenge.config.WhatsAppProperties;
 import com.tiam.common.email.EmailMessage;
 import com.tiam.pack.config.PackProperties;
+import com.tiam.pack.config.PackSalesReadiness;
+import com.tiam.pack.config.PackUrls;
 import com.tiam.pack.domain.PackOrder;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -48,6 +50,7 @@ public class PackAccessEmailComposer {
 
     private final PackProperties properties;
     private final WhatsAppProperties whatsAppProperties;
+    private final PackSalesReadiness readiness;
 
     /** The email sent right after the payment, with a stable idempotency key (one per order). */
     public EmailMessage compose(PackOrder order, Optional<String> gamesLink) {
@@ -98,9 +101,23 @@ public class PackAccessEmailComposer {
         return isPublicHttps(downloadBase());
     }
 
-    /** Only a public https Desafío link goes into an email; anything else would be a link that cannot work. */
-    private static String usableGamesLink(Optional<String> gamesLink) {
-        return gamesLink.filter(PackAccessEmailComposer::isPublicHttps).orElse(null);
+    /**
+     * Whether the downloads base can go into an email: a public https address or, ONLY with the dev mode active
+     * ({@code PACK_DEV_MODE=true}, which the prod profile ignores), the developer's own machine, so a local test
+     * can open the link of its own email. In production this is exactly {@link #hasPublicDownloadBase()}.
+     */
+    public boolean hasUsableDownloadBase() {
+        return hasPublicDownloadBase() || isDevLocalLink(downloadBase());
+    }
+
+    /** True only in a local test: the dev mode is on (and not in prod) and the link points at this machine. */
+    private boolean isDevLocalLink(String url) {
+        return readiness.devModeActive() && PackUrls.isLoopbackHttp(url);
+    }
+
+    /** Only a public https Desafío link goes into an email (a local one too in dev mode); anything else cannot work. */
+    private String usableGamesLink(Optional<String> gamesLink) {
+        return gamesLink.filter(link -> isPublicHttps(link) || isDevLocalLink(link)).orElse(null);
     }
 
     static boolean isPublicHttps(String url) {

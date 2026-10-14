@@ -1,10 +1,12 @@
 package com.tiam.pack.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.when;
 
 import com.tiam.challenge.config.WhatsAppProperties;
 import com.tiam.common.email.EmailMessage;
 import com.tiam.pack.config.PackProperties;
+import com.tiam.pack.config.PackSalesReadiness;
 import com.tiam.pack.domain.PackEdition;
 import com.tiam.pack.domain.PackOrder;
 import java.util.Optional;
@@ -17,6 +19,7 @@ class PackAccessEmailComposerTest {
 
     PackProperties properties;
     WhatsAppProperties whatsApp;
+    PackSalesReadiness readiness;
     PackAccessEmailComposer composer;
 
     @BeforeEach
@@ -26,7 +29,8 @@ class PackAccessEmailComposerTest {
         properties.setLandingBaseUrl("https://tiamdigital.com");
         whatsApp = new WhatsAppProperties();
         whatsApp.setBusinessNumber("5492214817297");
-        composer = new PackAccessEmailComposer(properties, whatsApp);
+        readiness = org.mockito.Mockito.mock(PackSalesReadiness.class); // dev mode off, like production
+        composer = new PackAccessEmailComposer(properties, whatsApp, readiness);
     }
 
     // --- the essentials -----------------------------------------------------------------------------
@@ -135,6 +139,40 @@ class PackAccessEmailComposerTest {
         assertThat(composer.hasPublicDownloadBase()).isFalse();
         properties.setDownloadBaseUrl("not a url");
         assertThat(composer.hasPublicDownloadBase()).isFalse();
+    }
+
+    @Test
+    void usableDownloadBase_inProduction_isExactlyThePublicHttpsRule() {
+        for (String base : new String[] {"http://localhost:5180/pack/descargas", "http://127.0.0.1/pack/descargas",
+                "http://tiamdigital.com/pack/descargas", ""}) {
+            properties.setDownloadBaseUrl(base);
+            assertThat(composer.hasUsableDownloadBase()).as(base).isFalse();
+        }
+        properties.setDownloadBaseUrl("https://tiamdigital.com/pack/descargas");
+        assertThat(composer.hasUsableDownloadBase()).isTrue();
+    }
+
+    @Test
+    void usableDownloadBase_inDevMode_alsoAcceptsTheDevelopersOwnMachine() {
+        when(readiness.devModeActive()).thenReturn(true);
+
+        properties.setDownloadBaseUrl("http://localhost:5180/pack/descargas");
+        assertThat(composer.hasUsableDownloadBase()).isTrue();
+        assertThat(composer.hasPublicDownloadBase()).as("the public check itself never relaxes").isFalse();
+        properties.setDownloadBaseUrl("http://localhost.evil.com/pack/descargas");
+        assertThat(composer.hasUsableDownloadBase()).isFalse();
+    }
+
+    @Test
+    void gamesLink_onLocalhost_isUsedOnlyInDevMode() {
+        PackOrder games = order();
+        games.setWithGames(true);
+        Optional<String> local = Optional.of("http://localhost:5180/desafio/tok");
+
+        assertThat(composer.compose(games, local).html()).doesNotContain("localhost");
+
+        when(readiness.devModeActive()).thenReturn(true);
+        assertThat(composer.compose(games, local).html()).contains("http://localhost:5180/desafio/tok");
     }
 
     @Test

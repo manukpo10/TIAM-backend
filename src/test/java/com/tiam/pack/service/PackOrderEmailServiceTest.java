@@ -13,11 +13,13 @@ import com.tiam.challenge.service.ChallengePurchaseService;
 import com.tiam.common.email.EmailMessage;
 import com.tiam.common.email.EmailSender;
 import com.tiam.pack.config.PackProperties;
+import com.tiam.pack.config.PackSalesReadiness;
 import com.tiam.pack.domain.PackEdition;
 import com.tiam.pack.domain.PackOrder;
 import com.tiam.pack.domain.PackOrderPaidEvent;
 import com.tiam.pack.domain.PackOrderStatus;
 import com.tiam.pack.repository.PackOrderRepository;
+import com.tiam.pack.storage.PrivateFileStore;
 import com.tiam.testsupport.MutableClock;
 import java.time.Instant;
 import java.util.Optional;
@@ -27,6 +29,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.mock.env.MockEnvironment;
 
 @ExtendWith(MockitoExtension.class)
 class PackOrderEmailServiceTest {
@@ -39,6 +42,7 @@ class PackOrderEmailServiceTest {
     @Mock ChallengePurchaseService challengePurchases;
 
     PackProperties properties;
+    MockEnvironment environment;
     PackOrderEmailService service;
 
     @BeforeEach
@@ -46,7 +50,10 @@ class PackOrderEmailServiceTest {
         properties = new PackProperties();
         properties.setDownloadBaseUrl("https://tiamdigital.com/pack/descargas");
         properties.setLandingBaseUrl("https://tiamdigital.com");
-        PackAccessEmailComposer composer = new PackAccessEmailComposer(properties, new WhatsAppProperties());
+        environment = new MockEnvironment();
+        PackSalesReadiness readiness = new PackSalesReadiness(properties, org.mockito.Mockito.mock(PrivateFileStore.class),
+                emailSender, environment);
+        PackAccessEmailComposer composer = new PackAccessEmailComposer(properties, new WhatsAppProperties(), readiness);
         service = new PackOrderEmailService(orders, composer, emailSender, challengePurchases, new MutableClock(NOW));
     }
 
@@ -159,6 +166,56 @@ class PackOrderEmailServiceTest {
         verify(emailSender, never()).send(any());
         verify(orders, never()).markEmailSent(anyLong(), any());
         assertThat(service.isBlockedByUnusableLinkBase()).isTrue();
+    }
+
+    // --- the local test (PACK_DEV_MODE) may use a localhost link base; production may not --------------------------
+
+    @Test
+    void devMode_letsTheLocalTestEmailCarryAnHttpLocalhostLink_soTheLinkOpensTheLocalOrder() {
+        properties.setDevMode(true);
+        properties.setDownloadBaseUrl("http://localhost:5180/pack/descargas");
+        givenOrder(PackOrderStatus.PAID);
+        givenDeliveryWorks();
+
+        assertThat(service.isBlockedByUnusableLinkBase()).isFalse();
+        assertThat(service.sendAccessEmail(42L)).isTrue();
+
+        ArgumentCaptor<EmailMessage> captor = ArgumentCaptor.forClass(EmailMessage.class);
+        verify(emailSender).send(captor.capture());
+        assertThat(captor.getValue().html()).contains("http://localhost:5180/pack/descargas/" + TOKEN);
+        assertThat(captor.getValue().text()).contains("http://localhost:5180/pack/descargas/" + TOKEN);
+    }
+
+    @Test
+    void devModeFlag_isIgnoredInTheProdProfile_soAForgottenFlagCannotSendBrokenLinksToBuyers() {
+        properties.setDevMode(true);
+        environment.setActiveProfiles("prod");
+        properties.setDownloadBaseUrl("http://localhost:5180/pack/descargas");
+        givenOrder(PackOrderStatus.PAID);
+        when(emailSender.isEnabled()).thenReturn(true);
+
+        assertThat(service.isBlockedByUnusableLinkBase()).isTrue();
+        assertThat(service.sendAccessEmail(42L)).isFalse();
+
+        verify(emailSender, never()).send(any());
+        verify(orders, never()).markEmailSent(anyLong(), any());
+    }
+
+    @Test
+    void devMode_relaxesOnlyLoopbackAddresses_notPlainHttpOrLookalikeHosts() {
+        properties.setDevMode(true);
+        when(emailSender.isEnabled()).thenReturn(true);
+
+        for (String base : new String[] {"http://tiamdigital.com/pack/descargas", "http://localhost.evil.com/pack/descargas",
+                "http://user@localhost:5180/pack/descargas", "ftp://localhost/pack/descargas", ""}) {
+            properties.setDownloadBaseUrl(base);
+            assertThat(service.isBlockedByUnusableLinkBase()).as(base).isTrue();
+        }
+        for (String base : new String[] {"http://localhost:5180/pack/descargas", "http://127.0.0.1:5180/pack/descargas",
+                "https://localhost:5443/pack/descargas"}) {
+            properties.setDownloadBaseUrl(base);
+            assertThat(service.isBlockedByUnusableLinkBase()).as(base).isFalse();
+        }
     }
 
     @Test

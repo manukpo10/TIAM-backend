@@ -14,11 +14,13 @@ import com.tiam.challenge.service.ChallengePurchaseService;
 import com.tiam.common.email.EmailMessage;
 import com.tiam.common.email.EmailSender;
 import com.tiam.pack.config.PackProperties;
+import com.tiam.pack.config.PackSalesReadiness;
 import com.tiam.pack.domain.PackEdition;
 import com.tiam.pack.domain.PackOrder;
 import com.tiam.pack.domain.PackOrderStatus;
 import com.tiam.pack.domain.PackTokens;
 import com.tiam.pack.repository.PackOrderRepository;
+import com.tiam.pack.storage.PrivateFileStore;
 import com.tiam.testsupport.MutableClock;
 import java.time.Duration;
 import java.time.Instant;
@@ -30,6 +32,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.mock.env.MockEnvironment;
 
 @ExtendWith(MockitoExtension.class)
 class PackAccessResenderTest {
@@ -42,6 +45,7 @@ class PackAccessResenderTest {
     @Mock ChallengePurchaseService challengePurchases;
 
     PackProperties properties;
+    MockEnvironment environment;
     MutableClock clock;
     PackAccessResender resender;
 
@@ -51,7 +55,10 @@ class PackAccessResenderTest {
         properties.setDownloadBaseUrl("https://tiamdigital.com/pack/descargas");
         properties.setLandingBaseUrl("https://tiamdigital.com");
         clock = new MutableClock(NOW);
-        PackAccessEmailComposer composer = new PackAccessEmailComposer(properties, new WhatsAppProperties());
+        environment = new MockEnvironment();
+        PackSalesReadiness readiness = new PackSalesReadiness(properties, org.mockito.Mockito.mock(PrivateFileStore.class),
+                emailSender, environment);
+        PackAccessEmailComposer composer = new PackAccessEmailComposer(properties, new WhatsAppProperties(), readiness);
         resender = new PackAccessResender(orders, packOrderService, composer, emailSender, challengePurchases,
                 new PackRateLimiter(clock), properties, clock);
     }
@@ -189,6 +196,38 @@ class PackAccessResenderTest {
         assertThat(resender.resendNow("ana@example.com")).isFalse();
 
         verify(packOrderService, never()).issueReplacementToken(any());
+    }
+
+    @Test
+    void resendNow_inDevMode_emailsAnHttpLocalhostLink_soTheLocalTestLinkOpensTheLocalOrder() {
+        properties.setDevMode(true);
+        properties.setDownloadBaseUrl("http://localhost:5180/pack/descargas");
+        PackOrder paid = paidOrder(42L, "old-token");
+        givenPaid("ana@example.com", paid);
+        when(emailSender.isEnabled()).thenReturn(true);
+        String replacement = PackTokens.newToken();
+        when(packOrderService.issueReplacementToken(42L)).thenReturn(Optional.of(new PackOrderService.ReplacementToken(paid, replacement)));
+        when(emailSender.send(any())).thenReturn(true);
+
+        assertThat(resender.resendNow("ana@example.com")).isTrue();
+
+        ArgumentCaptor<EmailMessage> captor = ArgumentCaptor.forClass(EmailMessage.class);
+        verify(emailSender).send(captor.capture());
+        assertThat(captor.getValue().html()).contains("http://localhost:5180/pack/descargas/" + replacement);
+    }
+
+    @Test
+    void resendNow_devModeFlagInTheProdProfile_stillRefusesALocalhostLink() {
+        properties.setDevMode(true);
+        environment.setActiveProfiles("prod");
+        properties.setDownloadBaseUrl("http://localhost:5180/pack/descargas");
+        givenPaid("ana@example.com", paidOrder(42L, "old-token"));
+        when(emailSender.isEnabled()).thenReturn(true);
+
+        assertThat(resender.resendNow("ana@example.com")).isFalse();
+
+        verify(packOrderService, never()).issueReplacementToken(any());
+        verify(emailSender, never()).send(any());
     }
 
     @Test

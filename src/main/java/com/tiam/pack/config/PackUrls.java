@@ -30,4 +30,28 @@ public final class PackUrls {
             return false;
         }
     }
+
+    /**
+     * http or https to the developer's own machine ({@code localhost}, {@code 127.0.0.1} or {@code [::1]}, any port).
+     * Used ONLY when the dev mode is active, to let a local test open the links of its own emails; it is never a
+     * substitute for {@link #isPublicHttps}.
+     */
+    public static boolean isLoopbackHttp(String url) {
+        if (!StringUtils.hasText(url)) {
+            return false;
+        }
+        try {
+            URI uri = new URI(url.strip());
+            String host = uri.getHost();
+            String scheme = uri.getScheme();
+            if (host == null || uri.getUserInfo() != null || scheme == null
+                    || !(scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https"))) {
+                return false;
+            }
+            String lower = host.toLowerCase(Locale.ROOT);
+            return lower.equals("localhost") || lower.equals("127.0.0.1") || lower.equals("[::1]") || lower.equals("::1");
+        } catch (URISyntaxException e) {
+            return false;
+        }
+    }
 }
