@@ -257,6 +257,34 @@ class PackDownloadServiceTest {
     // --- caps ---------------------------------------------------------------------------------------------------------------
 
     @Test
+    void issueLink_locksTheOrderBeforeCountingTheCaps_soParallelRequestsCannotOvershootThem() {
+        PackOrder order = givenOrder(PackOrderStatus.PAID, 90);
+        when(store.signedDownloadUrl(any(), any(), any())).thenReturn(SIGNED);
+
+        service.issueLink(token, "pack-completo-a4");
+
+        org.mockito.InOrder inOrder = org.mockito.Mockito.inOrder(orders, downloads);
+        inOrder.verify(orders).findWithLockById(order.getId());
+        inOrder.verify(downloads).countByOrderIdAndCreatedAtAfter(eq(order.getId()), any());
+        inOrder.verify(downloads).save(any());
+    }
+
+    @Test
+    void issueLink_anOrderRevokedWhileWaitingForTheLock_isNotFound() {
+        PackOrder order = givenOrder(PackOrderStatus.PAID, 90);
+        PackOrder revokedMeanwhile = new PackOrder();
+        revokedMeanwhile.setId(order.getId());
+        revokedMeanwhile.setStatus(PackOrderStatus.REVOKED);
+        revokedMeanwhile.setEdition(PackEdition.FAMILIAS);
+        revokedMeanwhile.setAccessExpiresAt(order.getAccessExpiresAt());
+        when(orders.findWithLockById(42L)).thenReturn(Optional.of(revokedMeanwhile));
+
+        assertThatThrownBy(() -> service.issueLink(token, "pack-completo-a4")).isInstanceOf(ResourceNotFoundException.class);
+
+        verifyNoInteractions(store);
+    }
+
+    @Test
     void issueLink_dailyCapReached_isRefused() {
         PackOrder order = givenOrder(PackOrderStatus.PAID, 90);
         when(downloads.countByOrderIdAndCreatedAtAfter(eq(order.getId()), any())).thenReturn(30L);
@@ -330,6 +358,7 @@ class PackDownloadServiceTest {
         order.setPaidAt(NOW.minus(Duration.ofDays(1)));
         order.setAccessExpiresAt(NOW.plus(Duration.ofDays(accessDaysLeft)));
         when(orders.findByAccessTokenAndActivoTrue(token)).thenReturn(Optional.of(order));
+        org.mockito.Mockito.lenient().when(orders.findWithLockById(42L)).thenReturn(Optional.of(order));
         return order;
     }
 }

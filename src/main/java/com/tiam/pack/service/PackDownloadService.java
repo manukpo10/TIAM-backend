@@ -81,7 +81,13 @@ public class PackDownloadService {
 
     @Transactional
     public DownloadLinkResponse issueLink(String token, String fileCode) {
-        PackOrder order = findVisibleOrder(token);
+        PackOrder visible = findVisibleOrder(token);
+        if (visible.getStatus() != PackOrderStatus.PAID) {
+            throw notFound();
+        }
+        // Lock the row before counting, so parallel requests queue up and each sees the previous one's event
+        // (otherwise a burst could all pass the cap check at once). Re-validate on the locked copy.
+        PackOrder order = orders.findWithLockById(visible.getId()).orElseThrow(PackDownloadService::notFound);
         if (order.getStatus() != PackOrderStatus.PAID) {
             throw notFound();
         }

@@ -7,6 +7,7 @@ import com.tiam.common.email.EmailSender;
 import com.tiam.pack.domain.PackOrder;
 import com.tiam.pack.domain.PackOrderStatus;
 import com.tiam.pack.repository.PackOrderRepository;
+import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -93,6 +94,9 @@ public class PackAccessResender {
             log.warn("Pack access re-send for order id={} was NOT delivered; the previous link was restored", orderId);
             return false;
         }
+        // If the very first email never made it, this one now covers it: settle that bookkeeping (a no-op when
+        // already set) so the retry job cannot send a late, redundant first email later.
+        orders.markEmailSent(orderId, Instant.now());
         log.info("Pack access re-sent for order id={} to {}", orderId, EmailAddresses.mask(email));
         return true;
     }

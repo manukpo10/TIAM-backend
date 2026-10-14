@@ -74,6 +74,34 @@ class PackAccessResenderTest {
     }
 
     @Test
+    void resendNow_aDeliveredResendAlsoRecordsTheEmailAsSent_soTheRetryJobNeverSendsALateDuplicate() {
+        PackOrder paid = paidOrder(42L, "old-token");
+        when(orders.findByEmailAndStatusAndActivoTrueOrderByPaidAtDesc(anyString(), any())).thenReturn(List.of(paid));
+        when(emailSender.isEnabled()).thenReturn(true);
+        PackOrder rotated = paidOrder(42L, PackTokens.newToken());
+        when(packOrderService.rotateAccess(42L)).thenReturn(Optional.of(new PackOrderService.AccessRotation(rotated, "old-token", NOW)));
+        when(emailSender.send(any())).thenReturn(true);
+
+        resender.resendNow("ana@example.com");
+
+        verify(orders).markEmailSent(eq(42L), any(Instant.class)); // conditional on email_sent_at still being null
+    }
+
+    @Test
+    void resendNow_aFailedResendRecordsNothing() {
+        PackOrder paid = paidOrder(42L, "old-token");
+        when(orders.findByEmailAndStatusAndActivoTrueOrderByPaidAtDesc(anyString(), any())).thenReturn(List.of(paid));
+        when(emailSender.isEnabled()).thenReturn(true);
+        PackOrder rotated = paidOrder(42L, PackTokens.newToken());
+        when(packOrderService.rotateAccess(42L)).thenReturn(Optional.of(new PackOrderService.AccessRotation(rotated, "old-token", NOW)));
+        when(emailSender.send(any())).thenReturn(false);
+
+        resender.resendNow("ana@example.com");
+
+        verify(orders, never()).markEmailSent(any(), any());
+    }
+
+    @Test
     void resendNow_usesTheMostRecentPaidOrderOnly() {
         PackOrder newest = paidOrder(43L, "t43");
         PackOrder older = paidOrder(42L, "t42");
