@@ -1,17 +1,20 @@
 package com.tiam.pack.service;
 
+import com.tiam.challenge.service.ChallengePurchaseService;
 import com.tiam.common.email.EmailAddresses;
 import com.tiam.common.email.EmailMessage;
 import com.tiam.common.email.EmailSender;
 import com.tiam.common.exception.BadRequestException;
 import com.tiam.pack.config.PackProperties;
 import com.tiam.pack.domain.PackOrder;
+import com.tiam.pack.domain.PackOrderStatus;
 import com.tiam.pack.domain.PackRegretRequest;
 import com.tiam.pack.dto.RegretReceiptResponse;
 import com.tiam.pack.dto.RegretRequest;
 import com.tiam.pack.repository.PackOrderRepository;
 import com.tiam.pack.repository.PackRegretRequestRepository;
 import java.time.Duration;
+import java.util.List;
 import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -29,8 +32,13 @@ import org.springframework.util.StringUtils;
  * email provider must never lose or reject a regret request, so it is logged and the buyer still gets the
  * reference on screen.
  *
- * <p>This is a public form that mails a user-supplied address, so it is rate limited per IP and per email
- * (otherwise it could be used to mail-bomb someone). Not transactional on purpose (it sends email).
+ * <p><b>The form must not become a mail relay.</b> It is public and the receipt would leave from the same domain
+ * that delivers purchase emails, so: (1) the receipt carries only the reference and the date, never the text the
+ * sender typed; (2) it is emailed ONLY to an address that has a paid purchase (pack or Desafío), while anyone
+ * else gets the same constancia on screen and nothing in their inbox; (3) the number of receipts per day is capped
+ * globally, so even a flood of rotating IPs and real customers' addresses cannot become a cannon; (4) the
+ * per-IP and per-email limits apply. The owner is ALWAYS told, whatever the sender. Not transactional on purpose
+ * (it sends email).
  */
 @Slf4j
 @Service
@@ -43,6 +51,7 @@ public class PackRegretService {
 
     private final PackRegretRequestRepository regrets;
     private final PackOrderRepository orders;
+    private final ChallengePurchaseService challengePurchases;
     private final PackRegretEmailComposer composer;
     private final EmailSender emailSender;
     private final PackProperties properties;
@@ -66,14 +75,32 @@ public class PackRegretService {
         String reference = String.format("ARR-%06d", entity.getId());
         log.info("Regret request {} recorded for {} (order id={})", reference, EmailAddresses.mask(email), entity.getOrderId());
 
-        sendQuietly(composer.buyerReceipt(entity, reference), reference);
+        boolean knownBuyer = isKnownBuyer(email);
+        if (knownBuyer && receiptAllowedToday()) {
+            sendQuietly(composer.buyerReceipt(entity, reference), reference);
+        } else {
+            log.info("Regret request {}: no receipt emailed ({})", reference,
+                    knownBuyer ? "daily receipt cap reached" : "the address has no purchase");
+        }
         String ownerAddress = properties.effectiveRegretNotifyTo();
         if (StringUtils.hasText(ownerAddress)) {
-            sendQuietly(composer.ownerNotice(entity, reference, ownerAddress), reference);
+            sendQuietly(composer.ownerNotice(entity, reference, ownerAddress, knownBuyer), reference);
         } else {
             log.warn("Regret request {} recorded but nobody was notified: PACK_REGRET_NOTIFY_TO is not set", reference);
         }
         return new RegretReceiptResponse(reference, entity.getCreatedAt());
+    }
+
+    /** A paid (or refunded / held) pack order, or a paid Desafío purchase, under this address. */
+    private boolean isKnownBuyer(String email) {
+        return orders.existsByEmailAndStatusInAndActivoTrue(email,
+                List.of(PackOrderStatus.PAID, PackOrderStatus.REVOKED, PackOrderStatus.REVIEW))
+                || challengePurchases.hasPaidPurchaseWithEmail(email);
+    }
+
+    private boolean receiptAllowedToday() {
+        return rateLimiter.tryAcquire("regret-receipts-global", properties.getRateLimits().getRegretReceiptsPerDay(),
+                Duration.ofDays(1));
     }
 
     private void validate(String email, String fullName) {

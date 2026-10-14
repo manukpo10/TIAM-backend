@@ -17,6 +17,9 @@ public interface ChallengePurchaseRepository extends JpaRepository<ChallengePurc
 
     Optional<ChallengePurchase> findByAccessTokenAndActivoTrue(String accessToken);
 
+    /** Whether an active purchase with this status carries this email (case-insensitive). */
+    boolean existsByEmailIgnoreCaseAndStatusAndActivoTrue(String email, ChallengePurchaseStatus status);
+
     List<ChallengePurchase> findByPhoneAndActivoTrue(String phone);
 
     /**

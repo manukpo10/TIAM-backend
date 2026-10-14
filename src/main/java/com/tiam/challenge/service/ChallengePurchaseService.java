@@ -348,6 +348,16 @@ public class ChallengePurchaseService {
         return firstUnpaidMonth(paidMonthsFor(rawPhone)).isPresent();
     }
 
+    /**
+     * Whether an active PAID purchase carries this email. Used by the regret form to decide whether the sender
+     * is a real customer (and so gets a receipt by email) or an unknown address (which gets none).
+     */
+    @Transactional(readOnly = true)
+    public boolean hasPaidPurchaseWithEmail(String email) {
+        return email != null && !email.isBlank()
+                && challengePurchaseRepository.existsByEmailIgnoreCaseAndStatusAndActivoTrue(email.strip(), ChallengePurchaseStatus.PAID);
+    }
+
     /** The lowest month on sale not in {@code paidMonths}, or empty when every month on sale is taken. */
     private static Optional<Integer> firstUnpaidMonth(Set<Integer> paidMonths) {
         for (int month = 1; month <= MONTHS_ON_SALE; month++) {

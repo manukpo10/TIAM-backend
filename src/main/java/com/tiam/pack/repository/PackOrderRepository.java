@@ -45,6 +45,9 @@ public interface PackOrderRepository extends JpaRepository<PackOrder, Long> {
     /** The buyer's paid orders, most recently paid first. Used when they ask for their access again. */
     List<PackOrder> findByEmailAndStatusAndActivoTrueOrderByPaidAtDesc(String email, PackOrderStatus status);
 
+    /** Whether this address has bought (or had a purchase held / refunded): used to decide who gets a regret receipt. */
+    boolean existsByEmailAndStatusInAndActivoTrue(String email, java.util.Collection<PackOrderStatus> statuses);
+
     long countByEmailAndStatusAndCreatedAtAfter(String email, PackOrderStatus status, Instant since);
 
     /**

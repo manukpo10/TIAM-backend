@@ -3,12 +3,14 @@ package com.tiam.pack.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import com.tiam.challenge.service.ChallengePurchaseService;
 import com.tiam.common.email.EmailMessage;
 import com.tiam.common.email.EmailSender;
 import com.tiam.common.exception.BadRequestException;
@@ -38,6 +40,7 @@ class PackRegretServiceTest {
     @Mock PackRegretRequestRepository regrets;
     @Mock PackOrderRepository orders;
     @Mock EmailSender emailSender;
+    @Mock ChallengePurchaseService challengePurchases;
 
     PackProperties properties;
     PackRegretService service;
@@ -46,8 +49,8 @@ class PackRegretServiceTest {
     void setUp() {
         properties = new PackProperties();
         properties.setRegretNotifyTo("owner@example.com");
-        service = new PackRegretService(regrets, orders, new PackRegretEmailComposer(), emailSender, properties,
-                new PackRateLimiter(new MutableClock(NOW)));
+        service = new PackRegretService(regrets, orders, challengePurchases, new PackRegretEmailComposer(), emailSender,
+                properties, new PackRateLimiter(new MutableClock(NOW)));
     }
 
     // --- recording ---------------------------------------------------------------------------------------
@@ -160,8 +163,9 @@ class PackRegretServiceTest {
     // --- the two emails ----------------------------------------------------------------------------------------------
 
     @Test
-    void submit_sendsTheBuyerAReceiptAndTheOwnerANotice() {
+    void submit_sendsAKnownBuyerAReceiptAndTheOwnerANotice() {
         givenSaveAssignsId(12L);
+        givenKnownPackBuyer("ana@example.com");
         when(emailSender.send(any())).thenReturn(true);
 
         service.submit(request("Ana Gómez", "ana@example.com", "42", "No lo necesito"), "1.2.3.4");
@@ -172,7 +176,7 @@ class PackRegretServiceTest {
         EmailMessage toBuyer = sent.stream().filter(m -> m.to().equals("ana@example.com")).findFirst().orElseThrow();
         EmailMessage toOwner = sent.stream().filter(m -> m.to().equals("owner@example.com")).findFirst().orElseThrow();
         assertThat(toBuyer.subject()).contains("ARR-000012");
-        assertThat(toBuyer.text()).contains("ARR-000012").contains("Ana");
+        assertThat(toBuyer.text()).contains("ARR-000012");
         assertThat(toBuyer.idempotencyKey()).isEqualTo("pack-regret/12");
         assertThat(toOwner.subject()).contains("ARR-000012");
         assertThat(toOwner.text()).contains("ana@example.com").contains("42").contains("No lo necesito");
@@ -180,9 +184,72 @@ class PackRegretServiceTest {
     }
 
     @Test
-    void submit_withNoOwnerAddress_stillRecordsAndStillSendsTheBuyerReceipt() {
+    void submit_anAddressThatNeverBought_getsNoEmailAtAll_butTheOwnerIsAlwaysTold() {
+        givenSaveAssignsId(12L);
+        when(emailSender.send(any())).thenReturn(true);
+
+        RegretReceiptResponse receipt = service.submit(
+                request("Phisher", "victim@example.com", "42", "Hacé clic en http://evil.example.com"), "1.2.3.4");
+
+        ArgumentCaptor<EmailMessage> captor = ArgumentCaptor.forClass(EmailMessage.class);
+        verify(emailSender, times(1)).send(captor.capture());
+        assertThat(captor.getValue().to()).isEqualTo("owner@example.com");
+        assertThat(captor.getValue().text()).contains("Comprador conocido: no");
+        assertThat(receipt.reference()).isEqualTo("ARR-000012"); // the buyer still gets the constancia on screen
+    }
+
+    @Test
+    void submit_aDesafioBuyer_isAlsoAKnownBuyer() {
+        givenSaveAssignsId(12L);
+        when(challengePurchases.hasPaidPurchaseWithEmail("ana@example.com")).thenReturn(true);
+        when(emailSender.send(any())).thenReturn(true);
+
+        service.submit(request("Ana Gómez", "ana@example.com", null, null), "1.2.3.4");
+
+        verify(emailSender, times(2)).send(any());
+    }
+
+    @Test
+    void submit_theBuyerReceiptNeverRepeatsWhatWasTyped_soItCannotCarryAttackerText() {
+        givenSaveAssignsId(12L);
+        givenKnownPackBuyer("ana@example.com");
+        when(emailSender.send(any())).thenReturn(true);
+
+        service.submit(request("Visitá http://evil.example.com ahora", "ana@example.com", "pack:42 evil-ref",
+                "Pagá a la cuenta 123 evil-reason"), "1.2.3.4");
+
+        ArgumentCaptor<EmailMessage> captor = ArgumentCaptor.forClass(EmailMessage.class);
+        verify(emailSender, times(2)).send(captor.capture());
+        EmailMessage toBuyer = captor.getAllValues().stream().filter(m -> m.to().equals("ana@example.com")).findFirst().orElseThrow();
+        assertThat(toBuyer.text()).doesNotContain("evil").doesNotContain("Visitá").doesNotContain("123");
+        assertThat(toBuyer.html()).doesNotContain("evil").doesNotContain("Visitá");
+    }
+
+    @Test
+    void submit_aGlobalDailyCapOnBuyerReceipts_stillRecordsAndStillTellsTheOwner() {
+        givenSaveAssignsId(12L);
+        properties.getRateLimits().setRegretReceiptsPerDay(2);
+        properties.getRateLimits().setRegretPerIp(100);
+        for (int i = 0; i < 4; i++) {
+            givenKnownPackBuyer("buyer" + i + "@example.com");
+        }
+        when(emailSender.send(any())).thenReturn(true);
+
+        for (int i = 0; i < 4; i++) {
+            service.submit(request("Ana Gómez", "buyer" + i + "@example.com", null, null), "9.9.9." + i);
+        }
+
+        ArgumentCaptor<EmailMessage> captor = ArgumentCaptor.forClass(EmailMessage.class);
+        verify(emailSender, times(2 + 4)).send(captor.capture()); // 2 receipts + 4 owner notices
+        assertThat(captor.getAllValues().stream().filter(m -> !m.to().equals("owner@example.com"))).hasSize(2);
+        verify(regrets, times(4)).save(any());
+    }
+
+    @Test
+    void submit_withNoOwnerAddress_stillRecordsAndStillSendsTheKnownBuyerReceipt() {
         properties.setRegretNotifyTo("");
         givenSaveAssignsId(12L);
+        givenKnownPackBuyer("ana@example.com");
         when(emailSender.send(any())).thenReturn(true);
 
         service.submit(request("Ana Gómez", "ana@example.com", null, null), "1.2.3.4");
@@ -230,6 +297,10 @@ class PackRegretServiceTest {
     }
 
     // --- helpers -----------------------------------------------------------------------------------------------------------------
+
+    private void givenKnownPackBuyer(String email) {
+        when(orders.existsByEmailAndStatusInAndActivoTrue(eq(email), any())).thenReturn(true);
+    }
 
     private void givenSaveAssignsId(long id) {
         when(regrets.save(any(PackRegretRequest.class))).thenAnswer(invocation -> {

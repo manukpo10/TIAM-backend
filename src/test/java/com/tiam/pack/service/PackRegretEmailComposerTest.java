@@ -19,27 +19,27 @@ class PackRegretEmailComposerTest {
         assertThat(message.subject()).isEqualTo("Recibimos tu solicitud de arrepentimiento (ARR-000012)");
         assertThat(message.text()).contains("ARR-000012");
         assertThat(message.text()).contains("14/10/2026"); // date in Argentina time
-        assertThat(message.text()).contains("42");
         assertThat(message.text()).contains("constancia");
         assertThat(message.html()).contains("ARR-000012");
         assertThat(message.idempotencyKey()).isEqualTo("pack-regret/12");
     }
 
     @Test
-    void buyerReceipt_escapesWhatTheBuyerTyped() {
-        EmailMessage message = composer.buyerReceipt(
-                request("<img src=x onerror=alert(1)>", "ana@example.com", "<b>42</b>", null), "ARR-000012");
+    void buyerReceipt_neverRepeatsFreeText_becauseTheFormIsPublicAndTheDomainDeliversPurchaseEmails() {
+        EmailMessage message = composer.buyerReceipt(request("Visitá evil.example.com", "ana@example.com",
+                "orden evil-ref", "pagá a evil-reason"), "ARR-000012");
 
-        assertThat(message.html()).doesNotContain("<img src=x").doesNotContain("<b>42</b>");
-        assertThat(message.html()).contains("&lt;img");
+        assertThat(message.text()).doesNotContain("evil").doesNotContain("Visitá").doesNotContain("pagá");
+        assertThat(message.html()).doesNotContain("evil").doesNotContain("Visitá").doesNotContain("pagá");
     }
 
     @Test
     void ownerNotice_carriesEverythingNeededToActOnIt() {
         EmailMessage message = composer.ownerNotice(
-                request("Ana Gómez", "ana@example.com", "42", "No lo necesito"), "ARR-000012", "owner@example.com");
+                request("Ana Gómez", "ana@example.com", "42", "No lo necesito"), "ARR-000012", "owner@example.com", true);
 
         assertThat(message.to()).isEqualTo("owner@example.com");
+        assertThat(message.text()).contains("Comprador conocido: sí");
         assertThat(message.subject()).isEqualTo("[TIAM Packs] Arrepentimiento ARR-000012");
         assertThat(message.text()).contains("Ana Gómez", "ana@example.com", "42", "No lo necesito", "ARR-000012");
         assertThat(message.idempotencyKey()).isEqualTo("pack-regret-owner/12");
@@ -48,14 +48,14 @@ class PackRegretEmailComposerTest {
     @Test
     void ownerNotice_escapesTheHtml() {
         EmailMessage message = composer.ownerNotice(
-                request("Ana", "ana@example.com", null, "<script>alert(1)</script>"), "ARR-000012", "owner@example.com");
+                request("Ana", "ana@example.com", null, "<script>alert(1)</script>"), "ARR-000012", "owner@example.com", false);
 
         assertThat(message.html()).doesNotContain("<script>").contains("&lt;script&gt;");
     }
 
     @Test
     void ownerNotice_saysSoWhenNoReasonOrOrderWasGiven() {
-        EmailMessage message = composer.ownerNotice(request("Ana", "ana@example.com", null, null), "ARR-000012", "owner@example.com");
+        EmailMessage message = composer.ownerNotice(request("Ana", "ana@example.com", null, null), "ARR-000012", "owner@example.com", false);
 
         assertThat(message.text()).contains("(no indicó)");
     }
