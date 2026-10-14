@@ -6,3 +6,6 @@ target/
 .env
 .env.*
 !.env.example
+
+# local development store for the paid pack files (PACK_STORAGE=local); never commit the PDFs
+/pack-files/
