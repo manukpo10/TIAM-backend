@@ -5,6 +5,7 @@ import com.mercadopago.exceptions.MPException;
 import com.tiam.challenge.config.WhatsAppProperties;
 import com.tiam.challenge.domain.ChallengeDayCatalog;
 import com.tiam.challenge.domain.ChallengePurchase;
+import com.tiam.challenge.domain.ChallengePurchasePaidEvent;
 import com.tiam.challenge.domain.ChallengePurchaseStatus;
 import com.tiam.challenge.dto.AdminGrantPurchaseRequest;
 import com.tiam.challenge.dto.AdminGrantPurchaseResponse;
@@ -21,6 +22,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -36,6 +38,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -48,12 +51,14 @@ class ChallengePurchaseServiceTest {
     @Mock ChallengePurchaseRepository challengePurchaseRepository;
     @Mock MercadoPagoService mercadoPagoService;
     @Mock WhatsAppProperties whatsAppProperties;
+    @Mock ApplicationEventPublisher eventPublisher;
 
     ChallengePurchaseService service;
 
     @BeforeEach
     void setUp() {
-        service = new ChallengePurchaseService(challengePurchaseRepository, mercadoPagoService, whatsAppProperties);
+        service = new ChallengePurchaseService(
+                challengePurchaseRepository, mercadoPagoService, whatsAppProperties, eventPublisher);
     }
 
     @Test
@@ -1034,6 +1039,71 @@ class ChallengePurchaseServiceTest {
         String reply = service.buildWhatsAppReply("541122334455");
 
         assertThat(reply).contains("http://localhost:5173/desafio-30-dias");
+    }
+
+    // --- markPaid: the "paid for the first time" event (drives the access email) ----
+
+    @Test
+    void markPaid_pendingPurchase_becomesPaidAndPublishesTheEventOnce() {
+        ChallengePurchase pending = purchase("Ana Diaz", ChallengePurchaseStatus.PENDING, null);
+        pending.setId(42L);
+        when(challengePurchaseRepository.findWithLockById(42L)).thenReturn(Optional.of(pending));
+
+        service.markPaid(42L, "999");
+
+        assertThat(pending.getStatus()).isEqualTo(ChallengePurchaseStatus.PAID);
+        assertThat(pending.getPurchaseDate()).isNotNull();
+        assertThat(pending.getMpPaymentId()).isEqualTo("999");
+        verify(challengePurchaseRepository).save(pending);
+        verify(eventPublisher).publishEvent(new ChallengePurchasePaidEvent(42L));
+    }
+
+    @Test
+    void markPaid_alreadyPaid_isANoOpAndPublishesNothing() {
+        // Duplicate webhook delivery / reconciliation re-run: must not trigger a
+        // second email.
+        ChallengePurchase alreadyPaid = purchase("Ana Diaz", ChallengePurchaseStatus.PAID, Instant.now());
+        alreadyPaid.setId(42L);
+        when(challengePurchaseRepository.findWithLockById(42L)).thenReturn(Optional.of(alreadyPaid));
+
+        service.markPaid(42L, "999");
+
+        verify(challengePurchaseRepository, never()).save(any());
+        verifyNoInteractions(eventPublisher);
+    }
+
+    @Test
+    void markPaid_calledTwiceForTheSamePurchase_publishesExactlyOneEvent() {
+        ChallengePurchase pending = purchase("Ana Diaz", ChallengePurchaseStatus.PENDING, null);
+        pending.setId(42L);
+        when(challengePurchaseRepository.findWithLockById(42L)).thenReturn(Optional.of(pending));
+
+        service.markPaid(42L, "999");
+        service.markPaid(42L, "999");
+
+        verify(eventPublisher, times(1)).publishEvent(any(ChallengePurchasePaidEvent.class));
+    }
+
+    @Test
+    void markPaid_purchaseThatHadFailed_publishesTheEventWhenTheLatePaymentLands() {
+        ChallengePurchase failed = purchase("Ana Diaz", ChallengePurchaseStatus.FAILED, null);
+        failed.setId(42L);
+        when(challengePurchaseRepository.findWithLockById(42L)).thenReturn(Optional.of(failed));
+
+        service.markPaid(42L, "999");
+
+        assertThat(failed.getStatus()).isEqualTo(ChallengePurchaseStatus.PAID);
+        verify(eventPublisher).publishEvent(new ChallengePurchasePaidEvent(42L));
+    }
+
+    @Test
+    void markPaid_unknownPurchase_throwsNotFoundAndPublishesNothing() {
+        when(challengePurchaseRepository.findWithLockById(42L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.markPaid(42L, "999"))
+                .isInstanceOf(ResourceNotFoundException.class);
+
+        verifyNoInteractions(eventPublisher);
     }
 
     // --- fixtures -------------------------------------------------------------

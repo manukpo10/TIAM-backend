@@ -46,4 +46,13 @@ public class ChallengePurchase extends BaseEntity {
      */
     @Column(name = "challenge_month", nullable = false)
     private Integer challengeMonth = 1;
+
+    /**
+     * When the access email was accepted by the email provider; null = never sent
+     * (no buyer email, provider not configured, or delivery failed). It is the
+     * persistent half of the send-once guarantee — see
+     * {@link com.tiam.challenge.service.ChallengePurchaseEmailService}.
+     */
+    @Column(name = "email_sent_at")
+    private Instant emailSentAt;
 }

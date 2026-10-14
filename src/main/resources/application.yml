@@ -37,6 +37,13 @@ spring:
     multipart:
       max-file-size: 5MB
       max-request-size: 5MB
+  task:
+    execution:
+      # @Async work (the after-payment access email) gets up to 20s to finish on
+      # SIGTERM instead of being interrupted mid-send during a Render deploy.
+      shutdown:
+        await-termination: true
+        await-termination-period: 20s
 
 management:
   endpoints:
@@ -82,6 +89,12 @@ tiam:
       # 30, not a short "abandoned cart" window — see ChallengeReconciliationProperties
       # for why (cash-coupon payments can confirm days after the purchase was created).
       lookback-days: ${CHALLENGE_RECONCILIATION_LOOKBACK_DAYS:30}
+    email-retry:
+      # Re-sends the access email to paid purchases that never got it — see ChallengeAccessEmailRetryService.
+      enabled: ${CHALLENGE_EMAIL_RETRY_ENABLED:true}
+      interval-ms: ${CHALLENGE_EMAIL_RETRY_INTERVAL_MS:900000} # 15 minutes
+      min-age-minutes: 5
+      lookback-hours: 72
   whatsapp:
     access-token: ${WHATSAPP_ACCESS_TOKEN:}
     phone-number-id: ${WHATSAPP_PHONE_NUMBER_ID:}
@@ -89,6 +102,8 @@ tiam:
     app-secret: ${WHATSAPP_APP_SECRET:}
     desafio-play-base-url: ${DESAFIO_PLAY_BASE_URL:http://localhost:5173/desafio}
     sales-page-url: ${DESAFIO_SALES_URL:http://localhost:5173/desafio-30-dias}
+    # Public number (same one the frontend links to), so it is safe as a default.
+    business-number: ${WHATSAPP_BUSINESS_NUMBER:5492214817297}
   email:
     # Transactional email via Resend. Both unset = emails are only logged, not sent
     # (see EmailConfig). The sender domain must be verified in Resend.

@@ -5,6 +5,7 @@ import com.mercadopago.exceptions.MPException;
 import com.tiam.challenge.config.WhatsAppProperties;
 import com.tiam.challenge.domain.ChallengeDayCatalog;
 import com.tiam.challenge.domain.ChallengePurchase;
+import com.tiam.challenge.domain.ChallengePurchasePaidEvent;
 import com.tiam.challenge.domain.ChallengePurchaseStatus;
 import com.tiam.challenge.dto.AdminGrantPurchaseRequest;
 import com.tiam.challenge.dto.AdminGrantPurchaseResponse;
@@ -30,6 +31,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -59,6 +61,7 @@ public class ChallengePurchaseService {
     private final ChallengePurchaseRepository challengePurchaseRepository;
     private final MercadoPagoService mercadoPagoService;
     private final WhatsAppProperties whatsAppProperties;
+    private final ApplicationEventPublisher eventPublisher;
 
     /**
      * One JVM-local lock per distinct phone that has ever attempted an
@@ -434,8 +437,18 @@ public class ChallengePurchaseService {
         challengePurchaseRepository.save(purchase);
         log.info("Challenge purchase id={} marked PAID via MP payment={}", purchaseId, mpPaymentId);
 
-        // TODO(whatsapp): trigger day-1 delivery once the WhatsApp Business Platform
-        // number is registered and approved. See engram integration/whatsapp-business-platform.
+        // The buyer's access email is sent from a listener that only runs AFTER this
+        // transaction commits (and off this thread), so a slow/failing email provider
+        // can neither hold this row lock nor roll back the payment. Reaching this line
+        // means the PENDING/FAILED -> PAID transition just happened under the row lock,
+        // so the event fires once per purchase; duplicate webhooks and reconciliation
+        // re-runs return early above.
+        eventPublisher.publishEvent(new ChallengePurchasePaidEvent(purchase.getId()));
+
+        // TODO(whatsapp): proactive day-1 delivery over WhatsApp once the WhatsApp
+        // Business Platform number is registered and approved. Until then the buyer
+        // gets the link by email and can still ask for it on WhatsApp.
+        // See engram integration/whatsapp-business-platform.
     }
 
     /**
