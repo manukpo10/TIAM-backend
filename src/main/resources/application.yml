@@ -89,3 +89,8 @@ tiam:
     app-secret: ${WHATSAPP_APP_SECRET:}
     desafio-play-base-url: ${DESAFIO_PLAY_BASE_URL:http://localhost:5173/desafio}
     sales-page-url: ${DESAFIO_SALES_URL:http://localhost:5173/desafio-30-dias}
+  email:
+    # Transactional email via Resend. Both unset = emails are only logged, not sent
+    # (see EmailConfig). The sender domain must be verified in Resend.
+    resend-api-key: ${RESEND_API_KEY:}
+    from: ${EMAIL_FROM:}
