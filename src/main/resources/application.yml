@@ -157,6 +157,8 @@ tiam:
       failed-lookback-days: 3
       max-per-run: 100
       max-run-seconds: 120
+      refund-lookback-days: 30       # PAID orders are checked for refunds / chargebacks whose notification was lost
+      refund-check-interval-hours: 6
     email-retry:
       # Re-sends the access email to paid orders that never got it — see PackEmailRetryService.
       enabled: ${PACK_EMAIL_RETRY_ENABLED:true}

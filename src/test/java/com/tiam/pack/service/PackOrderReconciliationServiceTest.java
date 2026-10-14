@@ -277,6 +277,104 @@ class PackOrderReconciliationServiceTest {
         verify(mercadoPago, times(4)).findLatestPaymentByExternalReference(any());
     }
 
+    // --- refunds that nobody told us about (M-09) ---------------------------------------------------------------------
+
+    @Test
+    void aPaidOrderWhosePaymentWasRefundedInMercadoPago_isRevoked_evenIfTheNotificationWasLost() throws Exception {
+        when(mercadoPago.isConfigured()).thenReturn(true);
+        givenNoUnpaidOrders();
+        PackOrder paid = paid(42L, "777");
+        when(orders.findStalePending(eq(PackOrderStatus.PAID), any(), any())).thenReturn(List.of(paid));
+        Payment refunded = payment(777L, "refunded");
+        when(mercadoPago.getPayment("777")).thenReturn(refunded);
+
+        service.reconcilePendingOrders();
+
+        ArgumentCaptor<PaymentSnapshot> snapshot = ArgumentCaptor.forClass(PaymentSnapshot.class);
+        verify(packOrderService).onPayment(eq(42L), snapshot.capture());
+        assertThat(snapshot.getValue().status()).isEqualTo("refunded");
+        assertThat(snapshot.getValue().paymentId()).isEqualTo("777");
+    }
+
+    @Test
+    void aChargeback_isRevokedToo() throws Exception {
+        when(mercadoPago.isConfigured()).thenReturn(true);
+        givenNoUnpaidOrders();
+        when(orders.findStalePending(eq(PackOrderStatus.PAID), any(), any())).thenReturn(List.of(paid(42L, "777")));
+        Payment chargedBack = payment(777L, "charged_back");
+        when(mercadoPago.getPayment("777")).thenReturn(chargedBack);
+
+        service.reconcilePendingOrders();
+
+        verify(packOrderService).onPayment(eq(42L), any());
+    }
+
+    @Test
+    void aPaidOrderWhosePaymentIsStillApproved_isLeftAlone_andIsNotReprocessed() throws Exception {
+        when(mercadoPago.isConfigured()).thenReturn(true);
+        givenNoUnpaidOrders();
+        when(orders.findStalePending(eq(PackOrderStatus.PAID), any(), any())).thenReturn(List.of(paid(42L, "777")));
+        Payment approved = mock(Payment.class);
+        when(approved.getStatus()).thenReturn("approved");
+        when(mercadoPago.getPayment("777")).thenReturn(approved);
+
+        service.reconcilePendingOrders();
+
+        verify(packOrderService, never()).onPayment(any(), any());
+    }
+
+    @Test
+    void paidOrders_areCheckedForRefundsOnlyOnceEverySixHours() throws Exception {
+        when(mercadoPago.isConfigured()).thenReturn(true);
+        givenNoUnpaidOrders();
+        when(orders.findStalePending(eq(PackOrderStatus.PAID), any(), any())).thenReturn(List.of(paid(42L, "777")));
+        Payment approved = mock(Payment.class);
+        when(approved.getStatus()).thenReturn("approved");
+        when(mercadoPago.getPayment("777")).thenReturn(approved);
+
+        service.reconcilePendingOrders();
+        clock.advance(Duration.ofMinutes(15));
+        service.reconcilePendingOrders();
+        verify(mercadoPago, times(1)).getPayment("777");
+
+        clock.advance(Duration.ofHours(6));
+        service.reconcilePendingOrders();
+        verify(mercadoPago, times(2)).getPayment("777");
+    }
+
+    @Test
+    void aPaidOrderWithoutAPaymentId_isSkipped_andOneFailureDoesNotStopTheOthers() throws Exception {
+        when(mercadoPago.isConfigured()).thenReturn(true);
+        givenNoUnpaidOrders();
+        PackOrder noPaymentId = paid(41L, null);
+        PackOrder failing = paid(42L, "111");
+        PackOrder refundedOne = paid(43L, "222");
+        when(orders.findStalePending(eq(PackOrderStatus.PAID), any(), any())).thenReturn(List.of(noPaymentId, failing, refundedOne));
+        when(mercadoPago.getPayment("111")).thenThrow(new IllegalStateException("MP blip"));
+        Payment refunded = payment(222L, "refunded");
+        when(mercadoPago.getPayment("222")).thenReturn(refunded);
+
+        service.reconcilePendingOrders();
+
+        verify(packOrderService).onPayment(eq(43L), any());
+        verify(packOrderService, never()).onPayment(eq(41L), any());
+    }
+
+    private void givenNoUnpaidOrders() {
+        org.mockito.Mockito.lenient().when(orders.findStalePending(eq(PackOrderStatus.PENDING), any(), any())).thenReturn(List.of());
+        org.mockito.Mockito.lenient().when(orders.findStalePending(eq(PackOrderStatus.FAILED), any(), any())).thenReturn(List.of());
+    }
+
+    private static PackOrder paid(long id, String mpPaymentId) {
+        PackOrder order = new PackOrder();
+        order.setId(id);
+        order.setStatus(PackOrderStatus.PAID);
+        order.setMpPaymentId(mpPaymentId);
+        order.setPaidAt(NOW.minus(Duration.ofDays(2)));
+        order.setCreatedAt(NOW.minus(Duration.ofDays(2)));
+        return order;
+    }
+
     private static PackOrder stale(long id) {
         PackOrder order = new PackOrder();
         order.setId(id);

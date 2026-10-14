@@ -25,6 +25,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 /**
  * Safety net for lost Mercado Pago notifications, the pack twin of the Desafío's reconciliation job: a
@@ -56,6 +57,8 @@ public class PackOrderReconciliationService {
      * of questions). Used to ask less and less often about orders that stay unpaid.
      */
     private final Map<Long, Instant> lastChecked = new ConcurrentHashMap<>();
+    /** Same idea for the refund check of PAID orders. */
+    private final Map<Long, Instant> lastRefundChecked = new ConcurrentHashMap<>();
 
     @Scheduled(fixedDelayString = "${tiam.pack.reconciliation.interval-ms:900000}")
     public void reconcilePendingOrders() {
@@ -69,6 +72,12 @@ public class PackOrderReconciliationService {
             return;
         }
 
+        Instant started = clock.instant();
+        reconcileUnpaid(settings);
+        checkPaidOrdersForRefunds(settings, started);
+    }
+
+    private void reconcileUnpaid(PackProperties.Reconciliation settings) {
         Instant now = clock.instant();
         Instant graceThreshold = now.minus(settings.getGracePeriodMinutes(), ChronoUnit.MINUTES);
         Instant lookbackThreshold = now.minus(settings.getLookbackDays(), ChronoUnit.DAYS);
@@ -93,7 +102,7 @@ public class PackOrderReconciliationService {
         }
 
         log.info("Pack order reconciliation: inspecting {} stale order(s) ({} in the window)", candidates.size(), byId.size());
-        Instant started = clock.instant();
+        Instant started = now;
         for (PackOrder order : candidates) {
             if (Duration.between(started, clock.instant()).toSeconds() >= settings.getMaxRunSeconds()) {
                 // Each Mercado Pago call can wait for its own timeout; do not let one run hold a scheduler thread for
@@ -107,6 +116,49 @@ public class PackOrderReconciliationService {
             } catch (Exception e) {
                 // One bad order must not abort the run.
                 log.error("Pack order reconciliation failed for order id={}: {}", order.getId(), e.getMessage(), e);
+            }
+        }
+    }
+
+    /**
+     * A refund or chargeback whose notification was lost would leave the buyer with working downloads for the rest
+     * of the 90 days. Every recently paid order is therefore asked about once every few hours (a plain lookup of
+     * its own payment id). Only a payment that is now {@code refunded} / {@code charged_back} is passed on: it
+     * goes through {@link PackOrderService#onPayment} like the webhook would. A PARTIAL refund leaves the payment
+     * "approved" and is deliberately NOT acted on: whether it should close the access is the owner's call.
+     * Shares the run's time budget and per-run cap with the unpaid-order pass.
+     */
+    private void checkPaidOrdersForRefunds(PackProperties.Reconciliation settings, Instant runStarted) {
+        Instant now = clock.instant();
+        List<PackOrder> paid = orders.findStalePending(PackOrderStatus.PAID,
+                now.minus(settings.getRefundLookbackDays(), ChronoUnit.DAYS), now);
+        lastRefundChecked.keySet().retainAll(paid.stream().map(PackOrder::getId).collect(Collectors.toSet()));
+        Duration every = Duration.ofHours(settings.getRefundCheckIntervalHours());
+        int asked = 0;
+        for (PackOrder order : paid) {
+            if (!StringUtils.hasText(order.getMpPaymentId())) {
+                continue;
+            }
+            Instant last = lastRefundChecked.get(order.getId());
+            if (last != null && last.plus(every).isAfter(now)) {
+                continue;
+            }
+            if (asked >= settings.getMaxPerRun()
+                    || Duration.between(runStarted, clock.instant()).toSeconds() >= settings.getMaxRunSeconds()) {
+                break;
+            }
+            asked++;
+            lastRefundChecked.put(order.getId(), now);
+            try {
+                Payment payment = mercadoPago.getPayment(order.getMpPaymentId());
+                String status = payment.getStatus();
+                if ("refunded".equals(status) || "charged_back".equals(status)) {
+                    log.warn("Pack order reconciliation: payment {} of order id={} is {} in Mercado Pago - revoking access",
+                            order.getMpPaymentId(), order.getId(), status);
+                    packOrderService.onPayment(order.getId(), PaymentSnapshot.from(order.getMpPaymentId(), payment));
+                }
+            } catch (Exception e) {
+                log.error("Pack refund check failed for order id={}: {}", order.getId(), e.getMessage(), e);
             }
         }
     }

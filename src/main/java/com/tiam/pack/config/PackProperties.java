@@ -96,6 +96,10 @@ public class PackProperties {
         private int maxPerRun = 100;
         /** A run stops asking Mercado Pago after this long, so a slow or failing API cannot hog a scheduler thread. */
         private int maxRunSeconds = 120;
+        /** PAID orders younger than this are checked for refunds / chargebacks whose notification was lost. */
+        private long refundLookbackDays = 30L;
+        /** How often one PAID order is asked about. */
+        private long refundCheckIntervalHours = 6L;
     }
 
     @Getter

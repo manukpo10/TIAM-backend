@@ -74,3 +74,7 @@ services:
         sync: false
       - key: R2_BUCKET
         sync: false
+      - key: CLIENT_IP_HEADER
+        sync: false
+      - key: CLIENT_IP_TRUSTED_HOPS
+        sync: false
