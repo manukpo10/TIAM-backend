@@ -96,6 +96,29 @@ class PackMigrationTest {
     }
 
     @Test
+    void nextAccessToken_isUniqueWhenPresent_butManyOrdersMayHaveNone() throws SQLException {
+        try (Connection c = connect()) {
+            long a = insertOrder(c, "tok-next-a", null);
+            long b = insertOrder(c, "tok-next-b", null);
+            setNextToken(c, a, "replacement-1");
+
+            assertThatThrownBy(() -> setNextToken(c, b, "replacement-1"))
+                    .isInstanceOfSatisfying(SQLException.class, e -> assertThat(e.getSQLState()).isEqualTo("23505"));
+            insertOrder(c, "tok-next-c", null); // a NULL next token is the normal case and never collides
+            insertOrder(c, "tok-next-d", null);
+        }
+    }
+
+    private static void setNextToken(Connection c, long orderId, String token) throws SQLException {
+        try (PreparedStatement ps = c.prepareStatement(
+                "update pack_orders set next_access_token = ?, next_access_token_issued_at = now() where id = ?")) {
+            ps.setString(1, token);
+            ps.setLong(2, orderId);
+            ps.executeUpdate();
+        }
+    }
+
+    @Test
     void downloadEvent_requiresAnExistingOrder() throws SQLException {
         try (Connection c = connect(); PreparedStatement ps = c.prepareStatement(
                 "insert into pack_download_events(order_id, file_key) values (?, ?)")) {

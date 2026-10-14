@@ -77,6 +77,18 @@ public class PackOrder extends BaseEntity {
     @Column(name = "access_expires_at")
     private Instant accessExpiresAt;
 
+    /**
+     * A second credential issued when the buyer asks for their link again ("I lost it"). It lives next to the
+     * working {@link #accessToken} instead of replacing it, so a stranger who knows the email cannot break the
+     * buyer's link by asking: the first time the NEW token is used it becomes the access token and the old one
+     * stops working. Null when none is pending.
+     */
+    @Column(name = "next_access_token", length = 64)
+    private String nextAccessToken;
+
+    @Column(name = "next_access_token_issued_at")
+    private Instant nextAccessTokenIssuedAt;
+
     /** When the access email was accepted by the provider; null = not delivered yet. */
     @Column(name = "email_sent_at")
     private Instant emailSentAt;

@@ -45,13 +45,14 @@ class PackOrderServiceTest {
     @Mock PackOwnerNotifier ownerNotifier;
 
     PackProperties properties;
+    MutableClock clock;
     PackOrderService service;
 
     @BeforeEach
     void setUp() {
         properties = new PackProperties();
-        service = new PackOrderService(orders, challengePurchases, events, properties, ownerNotifier,
-                new MutableClock(NOW));
+        clock = new MutableClock(NOW);
+        service = new PackOrderService(orders, challengePurchases, events, properties, ownerNotifier, clock);
     }
 
     // --- approved ------------------------------------------------------------------------------------
@@ -430,79 +431,120 @@ class PackOrderServiceTest {
         verifyNoMoreInteractions(ownerNotifier);
     }
 
-    // --- re-sending access: rotate the token, renew the window --------------------------------------------------
+    // --- re-sending access: a replacement token that never invalidates the working link ----------------------------
 
     @Test
-    void rotateAccess_issuesANewToken_andRenewsTheAccessWindow() {
+    void issueReplacementToken_createsAPendingToken_withoutTouchingTheLinkThatWorks() {
         PackOrder order = givenOrder(PackOrderStatus.PAID, "14990.00");
         order.setAccessToken("old-token");
         order.setAccessExpiresAt(NOW.plus(3, ChronoUnit.DAYS));
 
-        PackOrderService.AccessRotation rotation = service.rotateAccess(42L).orElseThrow();
+        PackOrderService.ReplacementToken issued = service.issueReplacementToken(42L).orElseThrow();
 
-        assertThat(order.getAccessToken()).isNotEqualTo("old-token").hasSize(43);
-        assertThat(order.getAccessExpiresAt()).isEqualTo(NOW.plus(90, ChronoUnit.DAYS));
-        assertThat(rotation.previousToken()).isEqualTo("old-token");
-        assertThat(rotation.previousExpiry()).isEqualTo(NOW.plus(3, ChronoUnit.DAYS));
-        assertThat(rotation.order()).isSameAs(order);
+        assertThat(issued.token()).hasSize(43).isNotEqualTo("old-token");
+        assertThat(order.getNextAccessToken()).isEqualTo(issued.token());
+        assertThat(order.getNextAccessTokenIssuedAt()).isEqualTo(NOW);
+        assertThat(order.getAccessToken()).as("a stranger asking for a re-send must not break the buyer's link").isEqualTo("old-token");
+        assertThat(order.getAccessExpiresAt()).isEqualTo(NOW.plus(3, ChronoUnit.DAYS));
+        assertThat(issued.order()).isSameAs(order);
         verify(orders).save(order);
     }
 
     @Test
-    void rotateAccess_alsoRevivesAnOrderWhoseWindowAlreadyClosed() {
-        PackOrder order = givenOrder(PackOrderStatus.PAID, "14990.00");
-        order.setAccessExpiresAt(NOW.minus(10, ChronoUnit.DAYS));
+    void issueReplacementToken_askedAgainWithinADay_handsOutTheSameToken_soRepeatedRequestsInvalidateNothing() {
+        givenOrder(PackOrderStatus.PAID, "14990.00");
+        String first = service.issueReplacementToken(42L).orElseThrow().token();
+        clock.advance(java.time.Duration.ofHours(23));
 
-        service.rotateAccess(42L);
+        String second = service.issueReplacementToken(42L).orElseThrow().token();
 
-        assertThat(order.getAccessExpiresAt()).isEqualTo(NOW.plus(90, ChronoUnit.DAYS));
+        assertThat(second).isEqualTo(first);
+        verify(orders, times(1)).save(any());
     }
 
     @Test
-    void rotateAccess_neverTouchesAnOrderThatIsNotPaid() {
+    void issueReplacementToken_afterADay_mintsAFreshOne() {
+        givenOrder(PackOrderStatus.PAID, "14990.00");
+        String first = service.issueReplacementToken(42L).orElseThrow().token();
+        clock.advance(java.time.Duration.ofHours(25));
+
+        String second = service.issueReplacementToken(42L).orElseThrow().token();
+
+        assertThat(second).isNotEqualTo(first);
+    }
+
+    @Test
+    void issueReplacementToken_neverTouchesAnOrderThatIsNotPaid() {
         for (PackOrderStatus status : new PackOrderStatus[] {PackOrderStatus.PENDING, PackOrderStatus.FAILED,
                 PackOrderStatus.REVIEW, PackOrderStatus.REVOKED}) {
             PackOrder order = givenOrder(status, "14990.00");
-            order.setAccessToken("keep-me");
 
-            assertThat(service.rotateAccess(42L)).as("status %s", status).isEmpty();
-            assertThat(order.getAccessToken()).isEqualTo("keep-me");
+            assertThat(service.issueReplacementToken(42L)).as("status %s", status).isEmpty();
+            assertThat(order.getNextAccessToken()).isNull();
         }
         verify(orders, never()).save(any());
     }
 
     @Test
-    void rotateAccess_doesNotTouchEmailSentAt_soTheFirstEmailLogicIsUnaffected() {
+    void issueReplacementToken_doesNotTouchEmailSentAt_soTheFirstEmailLogicIsUnaffected() {
         PackOrder order = givenOrder(PackOrderStatus.PAID, "14990.00");
         Instant sent = NOW.minus(1, ChronoUnit.DAYS);
         order.setEmailSentAt(sent);
 
-        service.rotateAccess(42L);
+        service.issueReplacementToken(42L);
 
         assertThat(order.getEmailSentAt()).isEqualTo(sent);
     }
 
     @Test
-    void restoreAccess_putsTheOldTokenBack_onlyIfTheNewOneIsStillTheCurrentOne() {
+    void promoteReplacementToken_whenTheBuyerOpensTheNewLink_itBecomesTheLink_andTheWindowIsRenewed() {
         PackOrder order = givenOrder(PackOrderStatus.PAID, "14990.00");
-        order.setAccessToken("new-token");
-        order.setAccessExpiresAt(NOW.plus(90, ChronoUnit.DAYS));
+        order.setAccessToken("old-token");
+        order.setAccessExpiresAt(NOW.minus(10, ChronoUnit.DAYS)); // even an expired one comes back to life
+        order.setNextAccessToken("new-token");
+        order.setNextAccessTokenIssuedAt(NOW.minus(1, ChronoUnit.DAYS));
 
-        service.restoreAccess(42L, "new-token", "old-token", NOW.plus(3, ChronoUnit.DAYS));
+        PackOrder promoted = service.promoteReplacementToken(42L, "new-token").orElseThrow();
 
-        assertThat(order.getAccessToken()).isEqualTo("old-token");
-        assertThat(order.getAccessExpiresAt()).isEqualTo(NOW.plus(3, ChronoUnit.DAYS));
+        assertThat(promoted.getAccessToken()).isEqualTo("new-token");
+        assertThat(promoted.getNextAccessToken()).isNull();
+        assertThat(promoted.getNextAccessTokenIssuedAt()).isNull();
+        assertThat(promoted.getAccessExpiresAt()).isEqualTo(NOW.plus(90, ChronoUnit.DAYS));
         verify(orders).save(order);
     }
 
     @Test
-    void restoreAccess_whenSomeoneRotatedAgainMeanwhile_leavesTheNewerTokenAlone() {
+    void promoteReplacementToken_aTokenThatIsAlreadyTheCurrentOne_isAHarmlessNoOp_forTheRaceBetweenTwoRequests() {
         PackOrder order = givenOrder(PackOrderStatus.PAID, "14990.00");
-        order.setAccessToken("even-newer-token");
+        order.setAccessToken("new-token");
+        order.setAccessExpiresAt(NOW.plus(80, ChronoUnit.DAYS));
 
-        service.restoreAccess(42L, "new-token", "old-token", NOW);
+        assertThat(service.promoteReplacementToken(42L, "new-token")).containsSame(order);
 
-        assertThat(order.getAccessToken()).isEqualTo("even-newer-token");
+        assertThat(order.getAccessExpiresAt()).isEqualTo(NOW.plus(80, ChronoUnit.DAYS));
+        verify(orders, never()).save(any());
+    }
+
+    @Test
+    void promoteReplacementToken_aStaleOrWrongToken_isRefused() {
+        PackOrder order = givenOrder(PackOrderStatus.PAID, "14990.00");
+        order.setAccessToken("old-token");
+        order.setNextAccessToken("new-token");
+        order.setNextAccessTokenIssuedAt(NOW.minus(31, ChronoUnit.DAYS));
+
+        assertThat(service.promoteReplacementToken(42L, "new-token")).as("older than 30 days").isEmpty();
+        assertThat(service.promoteReplacementToken(42L, "guess")).as("wrong token").isEmpty();
+        assertThat(order.getAccessToken()).isEqualTo("old-token");
+        verify(orders, never()).save(any());
+    }
+
+    @Test
+    void promoteReplacementToken_neverRevivesAnOrderThatIsNoLongerPaid() {
+        PackOrder order = givenOrder(PackOrderStatus.REVOKED, "14990.00");
+        order.setNextAccessToken("new-token");
+        order.setNextAccessTokenIssuedAt(NOW);
+
+        assertThat(service.promoteReplacementToken(42L, "new-token")).isEmpty();
         verify(orders, never()).save(any());
     }
 

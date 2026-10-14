@@ -64,6 +64,7 @@ class PackContractTest {
     @Mock PackPaymentConfirmationService confirmationService;
     @Mock PackAccessResendService resendService;
     @Mock PackRegretService regretService;
+    @Mock com.tiam.pack.service.PackOrderService packOrderService;
 
     MockMvc mvc;
 
@@ -71,7 +72,7 @@ class PackContractTest {
     void setUp() {
         PackProperties properties = new PackProperties();
         PackDownloadService downloadService = new PackDownloadService(
-                orders, downloads, store, challengePurchases, properties, new MutableClock(NOW));
+                orders, downloads, store, challengePurchases, properties, new MutableClock(NOW), packOrderService);
         mvc = MockMvcBuilders.standaloneSetup(
                         new PackOrderController(confirmationService, downloadService, new PackRateLimiter(), properties, TestIps.RESOLVER),
                         new PackAccessController(resendService, TestIps.RESOLVER),

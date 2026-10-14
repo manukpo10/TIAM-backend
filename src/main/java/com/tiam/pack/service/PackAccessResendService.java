@@ -1,6 +1,5 @@
 package com.tiam.pack.service;
 
-import com.tiam.common.email.EmailAddresses;
 import com.tiam.pack.config.PackProperties;
 import java.time.Duration;
 import java.util.Locale;
@@ -13,10 +12,13 @@ import org.springframework.stereotype.Service;
  * "I lost my link": the public, unauthenticated way to get a pack access email again.
  *
  * <p>It must reveal NOTHING about who bought. The HTTP answer is the same 202 whatever happens, and so is
- * the time it takes: this method only counts the request against two quotas and hands the real work (look
- * up, rotate, send) to {@link PackAccessResender} on another thread, so a buyer's email and a stranger's
- * are indistinguishable by response or by latency. Requests over quota are dropped silently for the same
- * reason (3 per email per day and 10 per client IP per hour, both configurable).
+ * the time it takes: this method only counts the request against the visitor's quota and hands the real work
+ * (look up, issue, send) to {@link PackAccessResender} on another thread, so a buyer's email and a stranger's
+ * are indistinguishable by response or by latency. Requests over quota are dropped silently for the same reason.
+ *
+ * <p>The per-email quota is NOT counted here: it is spent by the resender, only for an email that has a paid
+ * order. Counting it here made every distinct email a stranger typed add an entry to the limiter, and let a
+ * stranger use up a real buyer's daily quota with no buyer-visible trace.
  */
 @Slf4j
 @Service
@@ -34,16 +36,9 @@ public class PackAccessResendService {
         if (email.length() > 254 || !PLAUSIBLE_EMAIL.matcher(email).matches()) {
             return;
         }
-        PackProperties.RateLimits limits = properties.getRateLimits();
-        // The visitor's quota first: a blocked visitor must not also create per-email entries (that was how a
-        // script with unique emails grew the limiter without bound). An unknown IP is not limited.
-        if (!rateLimiter.tryAcquireByIp("resend-ip", clientIp, limits.getResendPerIp(), Duration.ofHours(1))) {
+        // An unknown IP is not limited (fail open); the per-email quota lives in the resender.
+        if (!rateLimiter.tryAcquireByIp("resend-ip", clientIp, properties.getRateLimits().getResendPerIp(), Duration.ofHours(1))) {
             log.warn("Pack access re-send over the IP quota (ip={}); dropped silently", clientIp);
-            return;
-        }
-        boolean emailAllowed = rateLimiter.tryAcquire("resend-email:" + email, limits.getResendPerEmail(), Duration.ofDays(1));
-        if (!emailAllowed) {
-            log.warn("Pack access re-send over the email quota ({}); dropped silently", EmailAddresses.mask(email));
             return;
         }
         resender.resendAsync(email);

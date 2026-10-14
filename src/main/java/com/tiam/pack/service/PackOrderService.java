@@ -10,6 +10,7 @@ import com.tiam.pack.domain.PackOrderStatus;
 import com.tiam.pack.domain.PackTokens;
 import com.tiam.pack.repository.PackOrderRepository;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Objects;
@@ -76,43 +77,70 @@ public class PackOrderService {
         return order.getStatus();
     }
 
-    /** The result of {@link #rotateAccess}: the order with its NEW token, and what to put back if delivery fails. */
-    public record AccessRotation(PackOrder order, String previousToken, Instant previousExpiry) {
+    /** The order with the replacement token that was issued (or re-issued) for it. */
+    public record ReplacementToken(PackOrder order, String token) {
     }
 
+    /** How long a replacement token is handed out again instead of minting another one. */
+    private static final Duration REPLACEMENT_REUSE = Duration.ofHours(24);
+    /** How long an unused replacement token stays valid. */
+    private static final Duration REPLACEMENT_LIFETIME = Duration.ofDays(30);
+
     /**
-     * Gives a paid order a brand-new access token and a fresh access window, invalidating the old link (which
-     * may have leaked). Used when the buyer asks for their access again. Empty when the order is not PAID
-     * (never revives a refunded or unpaid one). Does not touch {@code email_sent_at}.
+     * Issues the token for a "send me my link again" request, WITHOUT invalidating the working one. The request
+     * is public, so any stranger who knows an email can trigger it; if it revoked the buyer's link, that would be
+     * a free way to lock buyers out. Instead the new token waits next to the old one until the buyer opens it
+     * ({@link #promoteReplacementToken}). Asked again within a day, the same token comes back, so repeated
+     * requests (a script, or an impatient buyer) invalidate nothing and mint nothing. Empty when the order is not
+     * PAID (never revives a refunded or unpaid one). Does not touch {@code email_sent_at}.
      */
     @Transactional
-    public Optional<AccessRotation> rotateAccess(Long orderId) {
+    public Optional<ReplacementToken> issueReplacementToken(Long orderId) {
         PackOrder order = orders.findWithLockById(orderId).orElse(null);
         if (order == null || order.getStatus() != PackOrderStatus.PAID) {
             return Optional.empty();
         }
-        AccessRotation rotation = new AccessRotation(order, order.getAccessToken(), order.getAccessExpiresAt());
-        order.setAccessToken(PackTokens.newToken());
-        order.setAccessExpiresAt(clock.instant().plus(properties.getAccessDays(), ChronoUnit.DAYS));
-        orders.save(order);
-        log.info("Pack order id={}: access token rotated and access window renewed", orderId);
-        return Optional.of(rotation);
+        Instant now = clock.instant();
+        boolean reusable = order.getNextAccessToken() != null && order.getNextAccessTokenIssuedAt() != null
+                && order.getNextAccessTokenIssuedAt().plus(REPLACEMENT_REUSE).isAfter(now);
+        if (!reusable) {
+            order.setNextAccessToken(PackTokens.newToken());
+            order.setNextAccessTokenIssuedAt(now);
+            orders.save(order);
+            log.info("Pack order id={}: replacement access token issued (the current link keeps working)", orderId);
+        }
+        return Optional.of(new ReplacementToken(order, order.getNextAccessToken()));
     }
 
     /**
-     * Undoes a rotation whose email could not be delivered, so the buyer is not left with a dead old link and
-     * a new link they never received. A no-op if the token has changed again since.
+     * Called when someone presents a token that is not any order's current one: if it is this order's pending
+     * replacement (and still fresh), it becomes THE token, the old one stops working, and the access window is
+     * renewed. Opening the new link is the buyer's own choice, which is why this is the moment the old link dies.
+     *
+     * @return the order if {@code token} is now (or already was) its current token; empty otherwise
      */
     @Transactional
-    public void restoreAccess(Long orderId, String rotatedToken, String previousToken, Instant previousExpiry) {
-        orders.findWithLockById(orderId).ifPresent(order -> {
-            if (rotatedToken != null && rotatedToken.equals(order.getAccessToken())) {
-                order.setAccessToken(previousToken);
-                order.setAccessExpiresAt(previousExpiry);
-                orders.save(order);
-                log.warn("Pack order id={}: access rotation undone because the new link could not be emailed", orderId);
-            }
-        });
+    public Optional<PackOrder> promoteReplacementToken(Long orderId, String token) {
+        PackOrder order = orders.findWithLockById(orderId).orElse(null);
+        if (order == null || order.getStatus() != PackOrderStatus.PAID || token == null) {
+            return Optional.empty();
+        }
+        if (token.equals(order.getAccessToken())) {
+            return Optional.of(order); // a parallel request promoted it first
+        }
+        Instant now = clock.instant();
+        boolean fresh = order.getNextAccessTokenIssuedAt() != null
+                && order.getNextAccessTokenIssuedAt().plus(REPLACEMENT_LIFETIME).isAfter(now);
+        if (!token.equals(order.getNextAccessToken()) || !fresh) {
+            return Optional.empty();
+        }
+        order.setAccessToken(order.getNextAccessToken());
+        order.setNextAccessToken(null);
+        order.setNextAccessTokenIssuedAt(null);
+        order.setAccessExpiresAt(now.plus(properties.getAccessDays(), ChronoUnit.DAYS));
+        orders.save(order);
+        log.info("Pack order id={}: the replacement access token was used; the previous link no longer works", orderId);
+        return Optional.of(order);
     }
 
     private void onApproved(PackOrder order, PaymentSnapshot payment) {

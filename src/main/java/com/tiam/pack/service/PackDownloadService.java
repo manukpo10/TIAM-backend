@@ -21,6 +21,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -51,8 +52,10 @@ public class PackDownloadService {
     private final ChallengePurchaseService challengePurchases;
     private final PackProperties properties;
     private final Clock clock;
+    private final PackOrderService packOrderService;
 
-    @Transactional(readOnly = true)
+    /** Not read-only: the first visit with a re-sent link promotes it to the order's token (see findVisibleOrder). */
+    @Transactional
     public PackOrderResponse view(String token) {
         PackOrder order = findVisibleOrder(token);
         switch (order.getStatus()) {
@@ -137,11 +140,23 @@ public class PackDownloadService {
         if (!PackTokens.looksValid(token)) {
             throw notFound();
         }
-        PackOrder order = orders.findByAccessTokenAndActivoTrue(token).orElseThrow(PackDownloadService::notFound);
+        PackOrder order = orders.findByAccessTokenAndActivoTrue(token)
+                .or(() -> promoteReplacementToken(token))
+                .orElseThrow(PackDownloadService::notFound);
         if (order.getStatus() == PackOrderStatus.REVOKED) {
             throw notFound();
         }
         return order;
+    }
+
+    /**
+     * A token that is nobody's current one may be the replacement a buyer asked for ("I lost my link"). Using it
+     * for the first time makes it the order's token and retires the old one: the buyer chose to switch, which is
+     * what stops a stranger from invalidating a working link just by requesting a re-send.
+     */
+    private Optional<PackOrder> promoteReplacementToken(String token) {
+        return orders.findByNextAccessTokenAndActivoTrue(token)
+                .flatMap(candidate -> packOrderService.promoteReplacementToken(candidate.getId(), token));
     }
 
     private void requireOpenAccess(PackOrder order) {

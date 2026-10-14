@@ -47,6 +47,7 @@ class PackDownloadServiceTest {
     @Mock PackDownloadEventRepository downloads;
     @Mock PrivateFileStore store;
     @Mock ChallengePurchaseService challengePurchases;
+    @Mock PackOrderService packOrderService;
 
     PackProperties properties;
     PackDownloadService service;
@@ -54,7 +55,8 @@ class PackDownloadServiceTest {
     @BeforeEach
     void setUp() {
         properties = new PackProperties();
-        service = new PackDownloadService(orders, downloads, store, challengePurchases, properties, new MutableClock(NOW));
+        service = new PackDownloadService(orders, downloads, store, challengePurchases, properties, new MutableClock(NOW),
+                packOrderService);
     }
 
     // --- the order view ---------------------------------------------------------------------------------------------
@@ -166,6 +168,56 @@ class PackDownloadServiceTest {
 
         assertThatThrownBy(() -> service.view("not-a-token")).isInstanceOf(ResourceNotFoundException.class);
         assertThatThrownBy(() -> service.view(null)).isInstanceOf(ResourceNotFoundException.class);
+    }
+
+    // --- a re-sent ("I lost my link") token ---------------------------------------------------------------------------
+
+    @Test
+    void view_aReplacementToken_isPromotedOnFirstUse_andShowsTheOrder() {
+        PackOrder order = givenOrder(PackOrderStatus.PAID, 90);
+        String replacement = PackTokens.newToken();
+        when(orders.findByAccessTokenAndActivoTrue(replacement)).thenReturn(Optional.empty());
+        when(orders.findByNextAccessTokenAndActivoTrue(replacement)).thenReturn(Optional.of(order));
+        when(packOrderService.promoteReplacementToken(42L, replacement)).thenReturn(Optional.of(order));
+
+        PackOrderResponse view = service.view(replacement);
+
+        assertThat(view.status()).isEqualTo("PAID");
+        verify(packOrderService).promoteReplacementToken(42L, replacement);
+    }
+
+    @Test
+    void view_aReplacementTokenThatCannotBePromoted_isTheSameNotFound() {
+        PackOrder order = givenOrder(PackOrderStatus.PAID, 90);
+        String stale = PackTokens.newToken();
+        when(orders.findByAccessTokenAndActivoTrue(stale)).thenReturn(Optional.empty());
+        when(orders.findByNextAccessTokenAndActivoTrue(stale)).thenReturn(Optional.of(order));
+        when(packOrderService.promoteReplacementToken(42L, stale)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.view(stale)).isInstanceOf(ResourceNotFoundException.class);
+    }
+
+    @Test
+    void view_aTokenThatIsNobodys_neverReachesThePromotion() {
+        String unknown = PackTokens.newToken();
+        when(orders.findByAccessTokenAndActivoTrue(unknown)).thenReturn(Optional.empty());
+        when(orders.findByNextAccessTokenAndActivoTrue(unknown)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.view(unknown)).isInstanceOf(ResourceNotFoundException.class);
+
+        verifyNoInteractions(packOrderService);
+    }
+
+    @Test
+    void issueLink_withAReplacementToken_promotesItFirst() {
+        PackOrder order = givenOrder(PackOrderStatus.PAID, 90);
+        String replacement = PackTokens.newToken();
+        when(orders.findByAccessTokenAndActivoTrue(replacement)).thenReturn(Optional.empty());
+        when(orders.findByNextAccessTokenAndActivoTrue(replacement)).thenReturn(Optional.of(order));
+        when(packOrderService.promoteReplacementToken(42L, replacement)).thenReturn(Optional.of(order));
+        when(store.signedDownloadUrl(any(), any(), any())).thenReturn(SIGNED);
+
+        assertThat(service.issueLink(replacement, "pack-completo-a4").url()).isEqualTo(SIGNED);
     }
 
     @Test
@@ -366,7 +418,7 @@ class PackDownloadServiceTest {
         order.setTotalAmount(new java.math.BigDecimal("14990.00"));
         order.setPaidAt(NOW.minus(Duration.ofDays(1)));
         order.setAccessExpiresAt(NOW.plus(Duration.ofDays(accessDaysLeft)));
-        when(orders.findByAccessTokenAndActivoTrue(token)).thenReturn(Optional.of(order));
+        org.mockito.Mockito.lenient().when(orders.findByAccessTokenAndActivoTrue(token)).thenReturn(Optional.of(order));
         org.mockito.Mockito.lenient().when(orders.findWithLockById(42L)).thenReturn(Optional.of(order));
         return order;
     }

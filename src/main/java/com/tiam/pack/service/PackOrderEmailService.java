@@ -119,7 +119,7 @@ public class PackOrderEmailService {
         Optional<String> gamesLink = order.isWithGames()
                 ? challengePurchases.findAccessLinkIfActive(order.getChallengePurchaseId())
                 : Optional.empty();
-        EmailMessage message = composer.compose(order, gamesLink, PackAccessEmailComposer.Variant.FIRST);
+        EmailMessage message = composer.compose(order, gamesLink);
         if (!emailSender.send(message)) {
             log.warn("Pack access email for order id={} was NOT delivered (email_sent_at stays NULL; "
                     + "see the log lines above for the reason)", orderId);

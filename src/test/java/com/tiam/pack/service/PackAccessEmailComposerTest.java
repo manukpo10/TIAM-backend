@@ -33,7 +33,7 @@ class PackAccessEmailComposerTest {
 
     @Test
     void email_goesToTheBuyer_withTheDownloadLinkContainingTheToken() {
-        EmailMessage message = composer.compose(order(), Optional.empty(), PackAccessEmailComposer.Variant.FIRST);
+        EmailMessage message = composer.compose(order(), Optional.empty());
 
         assertThat(message.to()).isEqualTo("ana@example.com");
         assertThat(message.html()).contains("https://tiamdigital.com/pack/descargas/" + TOKEN);
@@ -42,14 +42,14 @@ class PackAccessEmailComposerTest {
 
     @Test
     void email_hasASubjectThatSaysWhatToDo() {
-        EmailMessage message = composer.compose(order(), Optional.empty(), PackAccessEmailComposer.Variant.FIRST);
+        EmailMessage message = composer.compose(order(), Optional.empty());
 
         assertThat(message.subject()).isEqualTo("Tu Pack TIAM está listo: descargá tus PDF");
     }
 
     @Test
     void email_hasABigButtonAndTheLinkRepeatedAsTextForClientsThatBlockButtons() {
-        EmailMessage message = composer.compose(order(), Optional.empty(), PackAccessEmailComposer.Variant.FIRST);
+        EmailMessage message = composer.compose(order(), Optional.empty());
 
         assertThat(message.html()).contains("Ir a mis descargas");
         assertThat(message.html()).contains("font-size:18px"); // accessible body type
@@ -61,7 +61,7 @@ class PackAccessEmailComposerTest {
     void email_mentionsHowLongAccessLastsAndHowToGetANewLink() {
         properties.setAccessDays(90);
 
-        EmailMessage message = composer.compose(order(), Optional.empty(), PackAccessEmailComposer.Variant.FIRST);
+        EmailMessage message = composer.compose(order(), Optional.empty());
 
         assertThat(message.text()).contains("90 días");
         assertThat(message.text()).contains("https://tiamdigital.com/pack/recuperar");
@@ -73,7 +73,7 @@ class PackAccessEmailComposerTest {
         PackOrder professionals = order();
         professionals.setEdition(PackEdition.PROFESIONALES);
 
-        EmailMessage message = composer.compose(professionals, Optional.empty(), PackAccessEmailComposer.Variant.FIRST);
+        EmailMessage message = composer.compose(professionals, Optional.empty());
 
         assertThat(message.text()).contains("Edición Profesionales");
     }
@@ -85,7 +85,7 @@ class PackAccessEmailComposerTest {
         PackOrder order = order();
         order.setBuyerName("<img src=x onerror=alert(1)> & Co");
 
-        EmailMessage message = composer.compose(order, Optional.empty(), PackAccessEmailComposer.Variant.FIRST);
+        EmailMessage message = composer.compose(order, Optional.empty());
 
         assertThat(message.html()).doesNotContain("<img src=x").contains("&lt;img");
     }
@@ -95,7 +95,7 @@ class PackAccessEmailComposerTest {
         PackOrder order = order();
         order.setBuyerName("{{LINK}}");
 
-        EmailMessage message = composer.compose(order, Optional.empty(), PackAccessEmailComposer.Variant.FIRST);
+        EmailMessage message = composer.compose(order, Optional.empty());
 
         // single-pass substitution: the greeting is data, never re-read as a template placeholder
         assertThat(message.html()).contains("Hola {{link}},");
@@ -106,7 +106,7 @@ class PackAccessEmailComposerTest {
         PackOrder order = order();
         order.setBuyerName("maría ELENA gómez");
 
-        EmailMessage message = composer.compose(order, Optional.empty(), PackAccessEmailComposer.Variant.FIRST);
+        EmailMessage message = composer.compose(order, Optional.empty());
 
         assertThat(message.text()).startsWith("Hola María,");
     }
@@ -115,7 +115,7 @@ class PackAccessEmailComposerTest {
     void noAttachmentsAreEverRepresented() {
         // The files are 19 MB and up and are only reachable through signed links: EmailMessage has no
         // attachment slot, and this email says where the files live instead.
-        EmailMessage message = composer.compose(order(), Optional.empty(), PackAccessEmailComposer.Variant.FIRST);
+        EmailMessage message = composer.compose(order(), Optional.empty());
 
         assertThat(message.getClass().getRecordComponents()).extracting("name")
                 .containsExactly("to", "subject", "html", "text", "idempotencyKey");
@@ -141,7 +141,7 @@ class PackAccessEmailComposerTest {
     void trailingSlashesOnTheBase_doNotProduceDoubleSlashes() {
         properties.setDownloadBaseUrl("https://tiamdigital.com/pack/descargas//");
 
-        EmailMessage message = composer.compose(order(), Optional.empty(), PackAccessEmailComposer.Variant.FIRST);
+        EmailMessage message = composer.compose(order(), Optional.empty());
 
         assertThat(message.text()).contains("https://tiamdigital.com/pack/descargas/" + TOKEN);
         assertThat(message.text()).doesNotContain("descargas//");
@@ -154,16 +154,15 @@ class PackAccessEmailComposerTest {
         PackOrder withExtra = order();
         withExtra.setWithExtra(true);
 
-        assertThat(composer.compose(withExtra, Optional.empty(), PackAccessEmailComposer.Variant.FIRST).text())
+        assertThat(composer.compose(withExtra, Optional.empty()).text())
                 .contains("Cuadernillo extra");
-        assertThat(composer.compose(order(), Optional.empty(), PackAccessEmailComposer.Variant.FIRST).text())
+        assertThat(composer.compose(order(), Optional.empty()).text())
                 .doesNotContain("Cuadernillo extra");
     }
 
     @Test
     void gamesBlock_isAbsentWhenTheBuyerDidNotBuyGames() {
-        EmailMessage message = composer.compose(order(), Optional.of("https://tiamdigital.com/desafio/tok"),
-                PackAccessEmailComposer.Variant.FIRST);
+        EmailMessage message = composer.compose(order(), Optional.of("https://tiamdigital.com/desafio/tok"));
 
         assertThat(message.html()).doesNotContain("mes de juegos").doesNotContain("/desafio/tok");
         assertThat(message.text()).doesNotContain("MES DE JUEGOS");
@@ -174,8 +173,7 @@ class PackAccessEmailComposerTest {
         PackOrder games = order();
         games.setWithGames(true);
 
-        EmailMessage message = composer.compose(games, Optional.of("https://tiamdigital.com/desafio/desafio-token-1"),
-                PackAccessEmailComposer.Variant.FIRST);
+        EmailMessage message = composer.compose(games, Optional.of("https://tiamdigital.com/desafio/desafio-token-1"));
 
         assertThat(message.html()).contains("Tu mes de juegos").contains("https://tiamdigital.com/desafio/desafio-token-1");
         assertThat(message.text()).contains("MES DE JUEGOS").contains("https://tiamdigital.com/desafio/desafio-token-1");
@@ -188,8 +186,7 @@ class PackAccessEmailComposerTest {
         PackOrder games = order();
         games.setWithGames(true);
 
-        EmailMessage message = composer.compose(games, Optional.of("http://localhost:5173/desafio/tok"),
-                PackAccessEmailComposer.Variant.FIRST);
+        EmailMessage message = composer.compose(games, Optional.of("http://localhost:5173/desafio/tok"));
 
         assertThat(message.html()).doesNotContain("localhost");
         assertThat(message.text()).doesNotContain("localhost");
@@ -201,7 +198,7 @@ class PackAccessEmailComposerTest {
         PackOrder games = order();
         games.setWithGames(true);
 
-        EmailMessage message = composer.compose(games, Optional.empty(), PackAccessEmailComposer.Variant.FIRST);
+        EmailMessage message = composer.compose(games, Optional.empty());
 
         assertThat(message.text()).contains("MES DE JUEGOS").contains("WhatsApp");
     }
@@ -210,30 +207,79 @@ class PackAccessEmailComposerTest {
 
     @Test
     void firstEmail_usesAStableIdempotencyKeyPerOrder() {
-        EmailMessage message = composer.compose(order(), Optional.empty(), PackAccessEmailComposer.Variant.FIRST);
+        EmailMessage message = composer.compose(order(), Optional.empty());
 
         assertThat(message.idempotencyKey()).isEqualTo("pack-access/42");
     }
 
+    // --- the "I lost my link" email (composeResend) -----------------------------------------------------------------
+
+    private static final String REPLACEMENT = "R".repeat(43);
+
     @Test
-    void resentEmail_hasADifferentKeyEveryTime_soTheProviderDoesNotDropIt() {
-        PackOrder first = order();
-        PackOrder second = order();
-        second.setAccessToken("ZZZZZZZZ" + TOKEN.substring(8));
+    void resend_linksToTheReplacementToken_notToTheOrdersCurrentOne() {
+        EmailMessage message = composer.composeResend("ana@example.com",
+                java.util.List.of(new PackAccessEmailComposer.ResendEntry(order(), REPLACEMENT, Optional.empty())), "key-1");
 
-        String a = composer.compose(first, Optional.empty(), PackAccessEmailComposer.Variant.RESEND).idempotencyKey();
-        String b = composer.compose(second, Optional.empty(), PackAccessEmailComposer.Variant.RESEND).idempotencyKey();
-
-        assertThat(a).startsWith("pack-access-resend/42/").isNotEqualTo("pack-access/42");
-        assertThat(a).isNotEqualTo(b);
+        assertThat(message.to()).isEqualTo("ana@example.com");
+        assertThat(message.subject()).isEqualTo("Tu acceso al Pack TIAM");
+        assertThat(message.idempotencyKey()).isEqualTo("key-1");
+        assertThat(message.html()).contains("https://tiamdigital.com/pack/descargas/" + REPLACEMENT);
+        assertThat(message.text()).contains("https://tiamdigital.com/pack/descargas/" + REPLACEMENT);
+        assertThat(message.html()).doesNotContain(TOKEN);
+        assertThat(message.text()).doesNotContain(TOKEN);
     }
 
     @Test
-    void resentEmail_saysItIsANewAccess() {
-        EmailMessage message = composer.compose(order(), Optional.empty(), PackAccessEmailComposer.Variant.RESEND);
+    void resend_isHonestThatTheOldLinkStillWorks_andTellsAStrangersVictimToIgnoreIt() {
+        EmailMessage message = composer.composeResend("ana@example.com",
+                java.util.List.of(new PackAccessEmailComposer.ResendEntry(order(), REPLACEMENT, Optional.empty())), "key");
 
-        assertThat(message.subject()).isEqualTo("Tu nuevo acceso al Pack TIAM");
-        assertThat(message.text()).contains("anterior");
+        assertThat(message.text()).contains("sigue funcionando").contains("Si vos no pediste este mensaje");
+        assertThat(message.html()).contains("sigue funcionando").contains("Si vos no pediste este mensaje");
+        assertThat(message.text()).doesNotContain("dejó de funcionar");
+    }
+
+    @Test
+    void resend_forABuyerOfBothEditions_putsBothLinksInOneEmail() {
+        PackOrder professionals = order();
+        professionals.setEdition(PackEdition.PROFESIONALES);
+        String otherToken = "O".repeat(43);
+
+        EmailMessage message = composer.composeResend("ana@example.com", java.util.List.of(
+                new PackAccessEmailComposer.ResendEntry(order(), REPLACEMENT, Optional.empty()),
+                new PackAccessEmailComposer.ResendEntry(professionals, otherToken, Optional.empty())), "key");
+
+        assertThat(message.text()).contains("Edición Familias").contains("Edición Profesionales")
+                .contains("/" + REPLACEMENT).contains("/" + otherToken).contains("tus links");
+        assertThat(message.html()).contains("Familias").contains("Profesionales")
+                .contains("/" + REPLACEMENT).contains("/" + otherToken);
+    }
+
+    @Test
+    void resend_carriesTheGamesBlockOnlyForTheOrdersThatBoughtIt() {
+        PackOrder games = order();
+        games.setWithGames(true);
+
+        EmailMessage message = composer.composeResend("ana@example.com", java.util.List.of(
+                new PackAccessEmailComposer.ResendEntry(games, REPLACEMENT, Optional.of("https://tiamdigital.com/desafio/tok"))), "key");
+        EmailMessage without = composer.composeResend("ana@example.com", java.util.List.of(
+                new PackAccessEmailComposer.ResendEntry(order(), REPLACEMENT, Optional.empty())), "key");
+
+        assertThat(message.text()).contains("https://tiamdigital.com/desafio/tok");
+        assertThat(message.html()).contains("https://tiamdigital.com/desafio/tok");
+        assertThat(without.text()).doesNotContain("Desafío");
+    }
+
+    @Test
+    void resend_escapesTheBuyerName() {
+        PackOrder order = order();
+        order.setBuyerName("<script>alert(1)</script>");
+
+        EmailMessage message = composer.composeResend("ana@example.com",
+                java.util.List.of(new PackAccessEmailComposer.ResendEntry(order, REPLACEMENT, Optional.empty())), "key");
+
+        assertThat(message.html()).doesNotContain("<script>");
     }
 
     private static PackOrder order() {

@@ -1,5 +1,6 @@
 package com.tiam.pack.service;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -43,24 +44,15 @@ class PackAccessResendServiceTest {
     }
 
     @Test
-    void request_threePerEmailPerDay_thenSilentlyDropped() {
-        for (int i = 0; i < 6; i++) {
-            service.request("ana@example.com", "1.2.3." + i);
+    void request_theEmailQuotaIsNotCountedHere_soStrangersEmailsLeaveNoTraceInTheLimiter() {
+        PackRateLimiter limiter = new PackRateLimiter(clock);
+        PackAccessResendService withLimiter = new PackAccessResendService(resender, limiter, properties);
+
+        for (int i = 0; i < 100; i++) {
+            withLimiter.request("stranger" + i + "@example.com", "1.2.3.4");
         }
 
-        verify(resender, org.mockito.Mockito.times(3)).resendAsync("ana@example.com");
-    }
-
-    @Test
-    void request_theEmailQuotaRefillsAfterADay() {
-        for (int i = 0; i < 3; i++) {
-            service.request("ana@example.com", "1.2.3." + i);
-        }
-        clock.advance(Duration.ofHours(24).plusSeconds(1));
-
-        service.request("ana@example.com", "9.9.9.9");
-
-        verify(resender, org.mockito.Mockito.times(4)).resendAsync("ana@example.com");
+        assertThat(limiter.trackedKeys()).as("one entry for the IP, none per email").isEqualTo(1);
     }
 
     @Test
@@ -74,13 +66,26 @@ class PackAccessResendServiceTest {
     }
 
     @Test
-    void request_limitsAreConfigurable() {
-        properties.getRateLimits().setResendPerEmail(1);
+    void request_theIpQuotaRefillsAfterAnHour() {
+        properties.getRateLimits().setResendPerIp(1);
+        service.request("a@example.com", "1.2.3.4");
+        service.request("b@example.com", "1.2.3.4");
+        clock.advance(Duration.ofMinutes(61));
 
-        service.request("ana@example.com", "1.2.3.4");
-        service.request("ana@example.com", "5.6.7.8");
+        service.request("c@example.com", "1.2.3.4");
 
-        verify(resender, org.mockito.Mockito.times(1)).resendAsync("ana@example.com");
+        verify(resender, org.mockito.Mockito.times(2)).resendAsync(any());
+    }
+
+    @Test
+    void request_anUnknownIp_isNotLimitedByIp() {
+        properties.getRateLimits().setResendPerIp(1);
+
+        for (int i = 0; i < 5; i++) {
+            service.request("buyer" + i + "@example.com", null);
+        }
+
+        verify(resender, org.mockito.Mockito.times(5)).resendAsync(any());
     }
 
     @Test

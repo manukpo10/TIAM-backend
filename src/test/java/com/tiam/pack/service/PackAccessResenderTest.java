@@ -19,6 +19,8 @@ import com.tiam.pack.domain.PackOrder;
 import com.tiam.pack.domain.PackOrderStatus;
 import com.tiam.pack.domain.PackTokens;
 import com.tiam.pack.repository.PackOrderRepository;
+import com.tiam.testsupport.MutableClock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -40,6 +42,7 @@ class PackAccessResenderTest {
     @Mock ChallengePurchaseService challengePurchases;
 
     PackProperties properties;
+    MutableClock clock;
     PackAccessResender resender;
 
     @BeforeEach
@@ -47,18 +50,19 @@ class PackAccessResenderTest {
         properties = new PackProperties();
         properties.setDownloadBaseUrl("https://tiamdigital.com/pack/descargas");
         properties.setLandingBaseUrl("https://tiamdigital.com");
+        clock = new MutableClock(NOW);
         PackAccessEmailComposer composer = new PackAccessEmailComposer(properties, new WhatsAppProperties());
-        resender = new PackAccessResender(orders, packOrderService, composer, emailSender, challengePurchases);
+        resender = new PackAccessResender(orders, packOrderService, composer, emailSender, challengePurchases,
+                new PackRateLimiter(clock), properties, clock);
     }
 
     @Test
-    void resendNow_rotatesTheToken_andEmailsTheNewLink() {
-        PackOrder paid = paidOrder(42L, "old-token");
-        when(orders.findByEmailAndStatusAndActivoTrueOrderByPaidAtDesc("ana@example.com", PackOrderStatus.PAID))
-                .thenReturn(List.of(paid));
+    void resendNow_issuesAReplacementToken_andEmailsItsLink_leavingTheWorkingLinkAlone() {
+        PackOrder paid = paidOrder(42L, "current-token");
+        givenPaid("ana@example.com", paid);
         when(emailSender.isEnabled()).thenReturn(true);
-        PackOrder rotated = paidOrder(42L, "new-token-" + PackTokens.newToken().substring(10));
-        when(packOrderService.rotateAccess(42L)).thenReturn(Optional.of(new PackOrderService.AccessRotation(rotated, "old-token", NOW)));
+        String replacement = PackTokens.newToken();
+        when(packOrderService.issueReplacementToken(42L)).thenReturn(Optional.of(new PackOrderService.ReplacementToken(paid, replacement)));
         when(emailSender.send(any())).thenReturn(true);
 
         boolean sent = resender.resendNow("ana@example.com");
@@ -67,19 +71,41 @@ class PackAccessResenderTest {
         ArgumentCaptor<EmailMessage> captor = ArgumentCaptor.forClass(EmailMessage.class);
         verify(emailSender).send(captor.capture());
         assertThat(captor.getValue().to()).isEqualTo("ana@example.com");
-        assertThat(captor.getValue().subject()).isEqualTo("Tu nuevo acceso al Pack TIAM");
-        assertThat(captor.getValue().html()).contains("https://tiamdigital.com/pack/descargas/" + rotated.getAccessToken());
-        assertThat(captor.getValue().html()).doesNotContain("old-token");
+        assertThat(captor.getValue().subject()).isEqualTo("Tu acceso al Pack TIAM");
+        assertThat(captor.getValue().html()).contains("https://tiamdigital.com/pack/descargas/" + replacement);
+        assertThat(captor.getValue().html()).doesNotContain("current-token");
         assertThat(captor.getValue().idempotencyKey()).startsWith("pack-access-resend/42/");
+        assertThat(paid.getAccessToken()).as("nothing was invalidated").isEqualTo("current-token");
+    }
+
+    @Test
+    void resendNow_aBuyerOfBothEditions_getsEveryLinkInOneEmail() {
+        PackOrder newest = paidOrder(43L, "t43");
+        newest.setEdition(PackEdition.PROFESIONALES);
+        PackOrder older = paidOrder(42L, "t42");
+        givenPaid("ana@example.com", newest, older);
+        when(emailSender.isEnabled()).thenReturn(true);
+        String r43 = PackTokens.newToken();
+        String r42 = PackTokens.newToken();
+        when(packOrderService.issueReplacementToken(43L)).thenReturn(Optional.of(new PackOrderService.ReplacementToken(newest, r43)));
+        when(packOrderService.issueReplacementToken(42L)).thenReturn(Optional.of(new PackOrderService.ReplacementToken(older, r42)));
+        when(emailSender.send(any())).thenReturn(true);
+
+        resender.resendNow("ana@example.com");
+
+        ArgumentCaptor<EmailMessage> captor = ArgumentCaptor.forClass(EmailMessage.class);
+        verify(emailSender, org.mockito.Mockito.times(1)).send(captor.capture());
+        assertThat(captor.getValue().text()).contains("/" + r43).contains("/" + r42)
+                .contains("Edición Profesionales").contains("Edición Familias");
     }
 
     @Test
     void resendNow_aDeliveredResendAlsoRecordsTheEmailAsSent_soTheRetryJobNeverSendsALateDuplicate() {
         PackOrder paid = paidOrder(42L, "old-token");
-        when(orders.findByEmailAndStatusAndActivoTrueOrderByPaidAtDesc(anyString(), any())).thenReturn(List.of(paid));
+        givenPaid("ana@example.com", paid);
         when(emailSender.isEnabled()).thenReturn(true);
-        PackOrder rotated = paidOrder(42L, PackTokens.newToken());
-        when(packOrderService.rotateAccess(42L)).thenReturn(Optional.of(new PackOrderService.AccessRotation(rotated, "old-token", NOW)));
+        when(packOrderService.issueReplacementToken(42L))
+                .thenReturn(Optional.of(new PackOrderService.ReplacementToken(paid, PackTokens.newToken())));
         when(emailSender.send(any())).thenReturn(true);
 
         resender.resendNow("ana@example.com");
@@ -88,94 +114,92 @@ class PackAccessResenderTest {
     }
 
     @Test
-    void resendNow_aFailedResendRecordsNothing() {
+    void resendNow_aFailedResendRecordsNothing_andThereIsNothingToUndo() {
         PackOrder paid = paidOrder(42L, "old-token");
-        when(orders.findByEmailAndStatusAndActivoTrueOrderByPaidAtDesc(anyString(), any())).thenReturn(List.of(paid));
+        givenPaid("ana@example.com", paid);
         when(emailSender.isEnabled()).thenReturn(true);
-        PackOrder rotated = paidOrder(42L, PackTokens.newToken());
-        when(packOrderService.rotateAccess(42L)).thenReturn(Optional.of(new PackOrderService.AccessRotation(rotated, "old-token", NOW)));
-        when(emailSender.send(any())).thenReturn(false);
-
-        resender.resendNow("ana@example.com");
-
-        verify(orders, never()).markEmailSent(any(), any());
-    }
-
-    @Test
-    void resendNow_usesTheMostRecentPaidOrderOnly() {
-        PackOrder newest = paidOrder(43L, "t43");
-        PackOrder older = paidOrder(42L, "t42");
-        when(orders.findByEmailAndStatusAndActivoTrueOrderByPaidAtDesc("ana@example.com", PackOrderStatus.PAID))
-                .thenReturn(List.of(newest, older));
-        when(emailSender.isEnabled()).thenReturn(true);
-        PackOrder rotated = paidOrder(43L, PackTokens.newToken());
-        when(packOrderService.rotateAccess(43L)).thenReturn(Optional.of(new PackOrderService.AccessRotation(rotated, "t43", NOW)));
-        when(emailSender.send(any())).thenReturn(true);
-
-        resender.resendNow("ana@example.com");
-
-        verify(packOrderService).rotateAccess(43L);
-        verify(packOrderService, never()).rotateAccess(42L);
-    }
-
-    @Test
-    void resendNow_noPaidOrderForThatEmail_doesNothing_quietly() {
-        when(orders.findByEmailAndStatusAndActivoTrueOrderByPaidAtDesc(anyString(), any())).thenReturn(List.of());
-
-        assertThat(resender.resendNow("nobody@example.com")).isFalse();
-
-        verifyNoInteractions(packOrderService, emailSender);
-    }
-
-    @Test
-    void resendNow_whenTheEmailCannotBeDelivered_theOldLinkIsRestored_soTheBuyerIsNotLockedOut() {
-        PackOrder paid = paidOrder(42L, "old-token");
-        when(orders.findByEmailAndStatusAndActivoTrueOrderByPaidAtDesc(anyString(), any())).thenReturn(List.of(paid));
-        when(emailSender.isEnabled()).thenReturn(true);
-        PackOrder rotated = paidOrder(42L, PackTokens.newToken());
-        Instant previousExpiry = NOW.plusSeconds(3600);
-        when(packOrderService.rotateAccess(42L))
-                .thenReturn(Optional.of(new PackOrderService.AccessRotation(rotated, "old-token", previousExpiry)));
+        when(packOrderService.issueReplacementToken(42L))
+                .thenReturn(Optional.of(new PackOrderService.ReplacementToken(paid, PackTokens.newToken())));
         when(emailSender.send(any())).thenReturn(false);
 
         assertThat(resender.resendNow("ana@example.com")).isFalse();
 
-        verify(packOrderService).restoreAccess(42L, rotated.getAccessToken(), "old-token", previousExpiry);
+        verify(orders, never()).markEmailSent(any(), any());
+        assertThat(paid.getAccessToken()).isEqualTo("old-token");
     }
 
     @Test
-    void resendNow_withoutARealEmailProvider_doesNotRotateAnything() {
+    void resendNow_noPaidOrderForThatEmail_doesNothing_andSpendsNoQuota() {
+        when(orders.findByEmailAndStatusAndActivoTrueOrderByPaidAtDesc(anyString(), any())).thenReturn(List.of());
+        properties.getRateLimits().setResendPerEmail(1);
+
+        for (int i = 0; i < 5; i++) {
+            assertThat(resender.resendNow("nobody@example.com")).isFalse();
+        }
+
+        verifyNoInteractions(packOrderService, emailSender);
+        // the quota of a stranger's typo is untouched: when this address does buy, it still has its full allowance
+        PackOrder paid = paidOrder(42L, "t");
+        givenPaid("nobody@example.com", paid);
+        when(emailSender.isEnabled()).thenReturn(true);
+        when(packOrderService.issueReplacementToken(42L))
+                .thenReturn(Optional.of(new PackOrderService.ReplacementToken(paid, PackTokens.newToken())));
+        when(emailSender.send(any())).thenReturn(true);
+        assertThat(resender.resendNow("nobody@example.com")).isTrue();
+    }
+
+    @Test
+    void resendNow_theEmailQuotaIsSpentOnlyForRealBuyers_andThenDropsSilently() {
+        PackOrder paid = paidOrder(42L, "t");
+        givenPaid("ana@example.com", paid);
+        when(emailSender.isEnabled()).thenReturn(true);
+        when(packOrderService.issueReplacementToken(42L))
+                .thenReturn(Optional.of(new PackOrderService.ReplacementToken(paid, PackTokens.newToken())));
+        when(emailSender.send(any())).thenReturn(true);
+        properties.getRateLimits().setResendPerEmail(2);
+
+        assertThat(resender.resendNow("ana@example.com")).isTrue();
+        assertThat(resender.resendNow("ana@example.com")).isTrue();
+        assertThat(resender.resendNow("ana@example.com")).isFalse();
+
+        verify(emailSender, org.mockito.Mockito.times(2)).send(any());
+        clock.advance(Duration.ofHours(24).plusSeconds(1));
+        assertThat(resender.resendNow("ana@example.com")).isTrue();
+    }
+
+    @Test
+    void resendNow_withoutARealEmailProvider_issuesNothing() {
         PackOrder paid = paidOrder(42L, "old-token");
-        when(orders.findByEmailAndStatusAndActivoTrueOrderByPaidAtDesc(anyString(), any())).thenReturn(List.of(paid));
+        givenPaid("ana@example.com", paid);
         when(emailSender.isEnabled()).thenReturn(false);
 
         assertThat(resender.resendNow("ana@example.com")).isFalse();
 
-        verify(packOrderService, never()).rotateAccess(any());
+        verify(packOrderService, never()).issueReplacementToken(any());
         verify(emailSender, never()).send(any());
     }
 
     @Test
-    void resendNow_withAnUnusableDownloadBase_doesNotRotateAnything() {
+    void resendNow_withAnUnusableDownloadBase_issuesNothing() {
         PackOrder paid = paidOrder(42L, "old-token");
-        when(orders.findByEmailAndStatusAndActivoTrueOrderByPaidAtDesc(anyString(), any())).thenReturn(List.of(paid));
+        givenPaid("ana@example.com", paid);
         when(emailSender.isEnabled()).thenReturn(true);
         properties.setDownloadBaseUrl("http://localhost:5173/pack/descargas");
 
         assertThat(resender.resendNow("ana@example.com")).isFalse();
 
-        verify(packOrderService, never()).rotateAccess(any());
+        verify(packOrderService, never()).issueReplacementToken(any());
     }
 
     @Test
     void resendNow_withGames_includesTheDesafioLink() {
         PackOrder paid = paidOrder(42L, "old-token");
-        when(orders.findByEmailAndStatusAndActivoTrueOrderByPaidAtDesc(anyString(), any())).thenReturn(List.of(paid));
+        paid.setWithGames(true);
+        paid.setChallengePurchaseId(77L);
+        givenPaid("ana@example.com", paid);
         when(emailSender.isEnabled()).thenReturn(true);
-        PackOrder rotated = paidOrder(42L, PackTokens.newToken());
-        rotated.setWithGames(true);
-        rotated.setChallengePurchaseId(77L);
-        when(packOrderService.rotateAccess(42L)).thenReturn(Optional.of(new PackOrderService.AccessRotation(rotated, "old-token", NOW)));
+        when(packOrderService.issueReplacementToken(42L))
+                .thenReturn(Optional.of(new PackOrderService.ReplacementToken(paid, PackTokens.newToken())));
         when(challengePurchases.findAccessLinkIfActive(77L)).thenReturn(Optional.of("https://tiamdigital.com/desafio/tok-77"));
         when(emailSender.send(any())).thenReturn(true);
 
@@ -189,9 +213,9 @@ class PackAccessResenderTest {
     @Test
     void resendNow_anOrderThatStoppedBeingPaidMeanwhile_isNotEmailed() {
         PackOrder paid = paidOrder(42L, "old-token");
-        when(orders.findByEmailAndStatusAndActivoTrueOrderByPaidAtDesc(anyString(), any())).thenReturn(List.of(paid));
+        givenPaid("ana@example.com", paid);
         when(emailSender.isEnabled()).thenReturn(true);
-        when(packOrderService.rotateAccess(42L)).thenReturn(Optional.empty()); // e.g. refunded in the meantime
+        when(packOrderService.issueReplacementToken(42L)).thenReturn(Optional.empty()); // e.g. refunded in the meantime
 
         assertThat(resender.resendNow("ana@example.com")).isFalse();
 
@@ -213,6 +237,10 @@ class PackAccessResenderTest {
         resender.resendNow("  Ana@Example.COM ");
 
         verify(orders).findByEmailAndStatusAndActivoTrueOrderByPaidAtDesc("ana@example.com", PackOrderStatus.PAID);
+    }
+
+    private void givenPaid(String email, PackOrder... paid) {
+        when(orders.findByEmailAndStatusAndActivoTrueOrderByPaidAtDesc(email, PackOrderStatus.PAID)).thenReturn(List.of(paid));
     }
 
     private static PackOrder paidOrder(long id, String token) {

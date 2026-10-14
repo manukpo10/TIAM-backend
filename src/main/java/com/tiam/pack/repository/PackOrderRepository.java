@@ -18,6 +18,9 @@ public interface PackOrderRepository extends JpaRepository<PackOrder, Long> {
 
     Optional<PackOrder> findByAccessTokenAndActivoTrue(String accessToken);
 
+    /** The order a pending replacement token (see PackOrder#getNextAccessToken) belongs to. */
+    Optional<PackOrder> findByNextAccessTokenAndActivoTrue(String nextAccessToken);
+
     /** Row-locking read for payment-driven transitions: two near-simultaneous notifications queue up. */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     Optional<PackOrder> findWithLockById(Long id);
