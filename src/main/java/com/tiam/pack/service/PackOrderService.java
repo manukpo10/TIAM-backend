@@ -255,6 +255,10 @@ public class PackOrderService {
                             + "pudo activar. El pack sí se entregó. Contactá al comprador (" + order.getEmail() + ").");
             return;
         }
+        // The Desafío service serialises months per phone with a JVM lock that is released BEFORE this transaction
+        // commits, so two packs for the same phone paid at the same moment could both see "month 1 is free" and
+        // both be given it. Holding a database lock per phone until this transaction ends closes that window.
+        orders.lockUntilTransactionEnds("pack-games-phone:" + order.getPhone());
         Optional<ChallengePurchase> granted = challengePurchases.grantBundledMonth(
                 order.getBuyerName(), order.getPhone(), order.getEmail());
         if (granted.isPresent()) {

@@ -48,6 +48,14 @@ public interface PackOrderRepository extends JpaRepository<PackOrder, Long> {
     /** Whether this address has bought (or had a purchase held / refunded): used to decide who gets a regret receipt. */
     boolean existsByEmailAndStatusInAndActivoTrue(String email, java.util.Collection<PackOrderStatus> statuses);
 
+    /**
+     * Takes a Postgres advisory lock that lasts until the CURRENT TRANSACTION ends (it waits if another transaction
+     * holds the same key). Used to serialise work per phone number across the whole payment transaction: unlike a
+     * JVM lock, it is not released before the commit. Must be called inside a transaction.
+     */
+    @Query(value = "select 1 from (select pg_advisory_xact_lock(hashtext(:key)) as locked) t", nativeQuery = true)
+    int lockUntilTransactionEnds(@Param("key") String key);
+
     long countByEmailAndStatusAndCreatedAtAfter(String email, PackOrderStatus status, Instant since);
 
     /**
