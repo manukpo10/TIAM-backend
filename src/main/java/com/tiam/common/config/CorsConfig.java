@@ -1,5 +1,6 @@
 package com.tiam.common.config;
 
+import jakarta.servlet.http.HttpServletRequest;
 import java.util.Arrays;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
@@ -13,6 +14,8 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 @Configuration
 @RequiredArgsConstructor
 public class CorsConfig {
+
+    private static final String CHECKOUT_PATH = "/packs/checkout";
 
     @Value("${tiam.cors.allowed-origins:http://localhost:5173}")
     private String allowedOriginsRaw;
@@ -31,6 +34,19 @@ public class CorsConfig {
 
         var source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);
-        return source;
+        return request -> isCheckoutFormPost(request) ? null : source.getCorsConfiguration(request);
+    }
+
+    /**
+     * The pack checkout is a plain HTML form post (a full-page navigation), not a fetch: CORS is the wrong
+     * tool for it, and Spring's CORS filter answers a post from an unlisted origin (apex vs www, a Vercel preview)
+     * with a bare "403 Invalid CORS request" page. Returning no CORS configuration for it lets the request reach
+     * PackCheckoutController, whose PackOriginPolicy applies the same origin list and answers with a redirect
+     * back to the landing ({@code ?error=origen}) that the page can explain. Every other endpoint keeps the
+     * strict list.
+     */
+    private static boolean isCheckoutFormPost(HttpServletRequest request) {
+        return "POST".equalsIgnoreCase(request.getMethod())
+                && (request.getContextPath() + CHECKOUT_PATH).equals(request.getRequestURI());
     }
 }
