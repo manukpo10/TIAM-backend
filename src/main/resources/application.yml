@@ -144,6 +144,8 @@ tiam:
     landing-base-url: ${PACK_LANDING_BASE_URL:http://localhost:5173}
     thankyou-url: ${PACK_THANKYOU_URL:http://localhost:5173/pack/gracias}
     download-base-url: ${PACK_DOWNLOAD_BASE_URL:http://localhost:5173/pack/descargas}
+    # Where the email images live (the frontend's public/email/). Public https in production.
+    email-assets-base-url: ${EMAIL_ASSETS_BASE_URL:https://www.tiamdigital.com/email}
     access-days: ${PACK_ACCESS_DAYS:90}
     catalog-version: ${PACK_CATALOG_VERSION:v1}
     regret-notify-to: ${PACK_REGRET_NOTIFY_TO:}

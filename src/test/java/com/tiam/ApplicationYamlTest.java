@@ -76,6 +76,15 @@ class ApplicationYamlTest {
     }
 
     @Test
+    void emailImages_comeFromTheEnvironment_withThePublicFrontendFolderAsDefault() throws Exception {
+        assertThat(yaml.getProperty("tiam.pack.email-assets-base-url"))
+                .isEqualTo("${EMAIL_ASSETS_BASE_URL:https://www.tiamdigital.com/email}");
+        assertThat(new com.tiam.pack.config.PackProperties().getEmailAssetsBaseUrl())
+                .isEqualTo("https://www.tiamdigital.com/email"); // the code default mirrors the yaml one
+        assertThat(java.nio.file.Files.readString(java.nio.file.Path.of("render.yaml"))).contains("EMAIL_ASSETS_BASE_URL");
+    }
+
+    @Test
     void packStorageCredentials_comeOnlyFromEnvironmentVariablesWithNoDefault() {
         assertThat(yaml.getProperty("tiam.pack.storage.r2-account-id")).isEqualTo("${R2_ACCOUNT_ID:}");
         assertThat(yaml.getProperty("tiam.pack.storage.r2-access-key-id")).isEqualTo("${R2_ACCESS_KEY_ID:}");

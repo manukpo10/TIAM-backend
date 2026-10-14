@@ -40,6 +40,13 @@ public class PackProperties {
     /** Base of the downloads page in the access email; the order token is appended as a path segment. */
     private String downloadBaseUrl = "http://localhost:5173/pack/descargas";
 
+    /**
+     * Public https folder that serves the images of the pack emails (logo, product picture): the frontend's
+     * {@code public/email/}. A sent email keeps pointing at these URLs for good, so the names there are stable.
+     * Only the dev mode may point it at a local frontend; anything else that is not public https is ignored.
+     */
+    private String emailAssetsBaseUrl = "https://www.tiamdigital.com/email";
+
     /** How long a paid order can download after paying (renewed when access is re-sent). */
     private int accessDays = 90;
 

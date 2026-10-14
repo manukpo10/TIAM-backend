@@ -1,38 +1,46 @@
 package com.tiam.pack.service;
 
+import static com.tiam.pack.service.PackEmailHtml.BLUE;
+import static com.tiam.pack.service.PackEmailHtml.GREEN;
+import static com.tiam.pack.service.PackEmailHtml.ORANGE;
+import static com.tiam.pack.service.PackEmailHtml.PURPLE;
+import static com.tiam.pack.service.PackEmailHtml.esc;
+
 import com.tiam.challenge.config.WhatsAppProperties;
 import com.tiam.common.email.EmailMessage;
 import com.tiam.pack.config.PackProperties;
 import com.tiam.pack.config.PackSalesReadiness;
 import com.tiam.pack.config.PackUrls;
+import com.tiam.pack.domain.PackCatalog;
+import com.tiam.pack.domain.PackEdition;
+import com.tiam.pack.domain.PackFile;
 import com.tiam.pack.domain.PackOrder;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Optional;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
-import org.springframework.web.util.HtmlUtils;
 
 /**
- * Builds the "Tu Pack TIAM está listo" email (rioplatense Spanish): one big button to the downloads page, the
- * link repeated as text, how long the access lasts and how to get a new link, and, when the buyer added the
- * games month, a block with their personal Desafío link. ONE email for the whole purchase.
+ * Builds the "Tu Pack TIAM está listo" email (rioplatense Spanish) and the "I lost my link" one: the look of the
+ * landings (logo, navy band, the buy-button orange, the product picture), one clear button to the downloads page,
+ * a "Tus archivos" panel with what was bought and what each file weighs, three printing tips, how long the access
+ * lasts and where to get a new link or help. ONE email for the whole purchase; when the buyer added the games
+ * month it carries their personal Desafío link and the activation step.
  *
  * <p>Nothing is attached: the files are 19 MB and up and only reachable through short-lived signed links
- * issued from the downloads page. Pure (no I/O) so the copy is unit-testable as plain strings.
+ * issued from the downloads page. Pure (no I/O), so the copy is unit-testable as plain strings. The markup lives in
+ * {@link PackEmailHtml}; the plain-text alternative is built here from the same facts, so the two cannot drift apart
+ * (the file list and the sizes come from {@link PackCatalog}).
  *
- * <p>Same accessibility stance as the Desafío email (the audience skews older): web-safe font, 18px body,
- * strong contrast, no orange text. Every dynamic value is HTML-escaped (the buyer name is user input) and
- * substituted in a single pass, so a value can never be re-read as a template placeholder.
+ * <p><b>Images</b> are loaded from stable public https URLs: {@code EMAIL_ASSETS_BASE_URL} (default
+ * https://www.tiamdigital.com/email, the frontend's {@code public/email/}) plus a fixed file name. Every dynamic
+ * value is HTML-escaped (the buyer name is user input) and nothing a user typed is ever read as a template.
  */
 @Component
 @RequiredArgsConstructor
@@ -41,32 +49,207 @@ public class PackAccessEmailComposer {
     static final String SUBJECT_FIRST = "Tu Pack TIAM está listo: descargá tus PDF";
     static final String SUBJECT_RESEND = "Tu acceso al Pack TIAM";
 
+    static final String CTA_LABEL = "Descargar mis archivos";
+    static final String DEFAULT_ASSETS_BASE_URL = "https://www.tiamdigital.com/email";
+    static final String LOGO_FILE = "logo-tiam.png";
+
+    /** The logo file is 286x160 (2x); it is shown at 120x67, the 429:240 ratio of the landings. */
+    private static final int LOGO_WIDTH = 120;
+    private static final int LOGO_HEIGHT = 67;
+
     /** One paid order in a re-send email: the replacement token to link to and, with the games add-on, the Desafío link. */
     public record ResendEntry(PackOrder order, String token, Optional<String> gamesLink) {
     }
 
-    private static final String WHATSAPP_PREFILLED_TEXT = "Hola, compré el Pack TIAM con el mes de juegos y quiero activarlo.";
-    private static final Pattern PLACEHOLDER = Pattern.compile("\\{\\{(\\w+)}}");
+    private static final String WHATSAPP_GAMES_TEXT = "Hola, compré el Pack TIAM con el mes de juegos y quiero activarlo.";
+    private static final String WHATSAPP_HELP_TEXT = "Hola, necesito ayuda con mi Pack TIAM.";
 
     private final PackProperties properties;
     private final WhatsAppProperties whatsAppProperties;
     private final PackSalesReadiness readiness;
 
+    /** What every section of one email needs, resolved once. */
+    private record Context(String name, String recoverLink, String activationUrl, String helpUrl, String assetsBase) {
+        String greeting() {
+            return name.isEmpty() ? "Hola," : "Hola " + name + ",";
+        }
+    }
+
+    private Context context(String buyerName) {
+        return new Context(firstName(buyerName), recoverLink(), whatsAppUrl(WHATSAPP_GAMES_TEXT),
+                whatsAppUrl(WHATSAPP_HELP_TEXT), assetsBase());
+    }
+
+    // ---- the first email ---------------------------------------------------------------------------
+
     /** The email sent right after the payment, with a stable idempotency key (one per order). */
     public EmailMessage compose(PackOrder order, Optional<String> gamesLink) {
+        Context ctx = context(order.getBuyerName());
         String link = downloadLink(order);
-        String name = firstName(order.getBuyerName());
-        String recoverLink = recoverLink();
         String gamesUrl = order.isWithGames() ? usableGamesLink(gamesLink) : null;
-        String whatsAppUrl = order.isWithGames() ? whatsAppUrl() : null;
 
         return new EmailMessage(
                 order.getEmail().trim(),
                 SUBJECT_FIRST,
-                renderHtml(order, link, name, recoverLink, gamesUrl, whatsAppUrl),
-                renderText(order, link, name, recoverLink, gamesUrl, whatsAppUrl),
+                renderHtml(order, link, ctx, gamesUrl),
+                renderText(order, link, ctx, gamesUrl),
                 "pack-access/" + order.getId());
     }
+
+    private String renderHtml(PackOrder order, String link, Context ctx, String gamesUrl) {
+        PackEdition edition = order.getEdition();
+        String days = String.valueOf(properties.getAccessDays());
+
+        String cta = PackEmailHtml.button(link, CTA_LABEL, ORANGE)
+                + "<p style=\"margin:18px 0 0 0;font-size:13px;line-height:20px;color:#B5C5DB;\">¿No abre el botón? "
+                + "Copiá este link en tu navegador:<br>"
+                + "<a href=\"" + esc(link) + "\" style=\"color:#9CC3EE;text-decoration:underline;word-break:break-all;\">"
+                + esc(link) + "</a></p>";
+        String intro = "<strong style=\"color:#FFFFFF;\">" + esc(ctx.greeting()) + "</strong> gracias por tu compra. "
+                + "Tus fichas ya están listas para descargar e imprimir.";
+
+        StringBuilder rows = new StringBuilder();
+        rows.append(PackEmailHtml.hero("PACK TIAM · EDICIÓN " + edition.displayName().toUpperCase(Locale.ROOT),
+                "¡Tu Pack TIAM está listo!", intro, cta));
+        rows.append(PackEmailHtml.productImage(ctx.assetsBase() + "/pack-" + edition.slug() + ".jpg", productAlt(edition)));
+
+        StringBuilder content = new StringBuilder();
+        content.append(filesPanel(order, gamesUrl, ctx));
+        content.append(printingTips(edition));
+        content.append(PackEmailHtml.ruleThen(
+                PackEmailHtml.paragraph("<strong>Tu acceso a las descargas dura " + days + " días</strong> desde hoy. "
+                        + "El link es personal: no lo compartas.", "")
+                        + PackEmailHtml.muted(helpLine(ctx))));
+        rows.append(PackEmailHtml.body(content.toString()));
+
+        return PackEmailHtml.page("Tu Pack TIAM", "Tus fichas ya están listas para descargar e imprimir. Tu acceso dura "
+                + days + " días.", ctx.assetsBase() + "/" + LOGO_FILE, LOGO_WIDTH, LOGO_HEIGHT, rows.toString());
+    }
+
+    /** "Tus archivos": what was bought, one row each, with what it weighs, and the games activation step. */
+    private String filesPanel(PackOrder order, String gamesUrl, Context ctx) {
+        PackEdition edition = order.getEdition();
+        StringBuilder rows = new StringBuilder();
+        rows.append(PackEmailHtml.fileRow(BLUE, "Pack completo", "PDF · «Empezá acá» y los 12 cuadernillos",
+                sizeMb(edition, "pack-completo-a4") + " MB", ""));
+        rows.append(PackEmailHtml.fileRow(ORANGE, "Cuadernillos sueltos", "ZIP · los cuadernillos por separado, para imprimir de a uno",
+                sizeMb(edition, "cuadernillos-a4") + " MB", ""));
+        if (order.isWithExtra()) {
+            rows.append(PackEmailHtml.fileRow(GREEN, "Cuadernillo extra", "PDF · 40 fichas más, 10 por área",
+                    sizeMb(edition, "extra-a4") + " MB", ""));
+        }
+        if (order.isWithGames()) {
+            rows.append(PackEmailHtml.fileRow(PURPLE, "Tu mes de juegos", "Desafío de 30 días · 7 ejercicios nuevos por semana", "",
+                    gamesSteps(gamesUrl, ctx)));
+        }
+        rows.append(PackEmailHtml.panelNote("Cada archivo viene en <strong>A4 y en Carta</strong>: elegí el de tu impresora "
+                + "(si dudás, A4). Podés imprimirlos todas las veces que quieras."));
+        return PackEmailHtml.panel("Tus archivos", "Edición " + esc(edition.displayName()), rows.toString());
+    }
+
+    /** The games month: open it with the personal link when there is one, and how to activate it by WhatsApp. */
+    private static String gamesSteps(String gamesUrl, Context ctx) {
+        StringBuilder html = new StringBuilder("<div style=\"padding-top:10px;\">");
+        if (gamesUrl != null) {
+            html.append(PackEmailHtml.muted("Ya está activo: entrá desde tu link personal."));
+            html.append(PackEmailHtml.smallButton(gamesUrl, "Abrir mi mes de juegos", BLUE));
+            html.append(PackEmailHtml.muted("Para recibir los ejercicios por WhatsApp, escribinos desde el mismo número que dejaste al comprar."));
+        } else {
+            html.append(PackEmailHtml.muted("Para activarlo, escribinos por WhatsApp desde el mismo número que dejaste al comprar: "
+                    + "te llega el primer ejercicio."));
+        }
+        if (ctx.activationUrl() != null) {
+            html.append(PackEmailHtml.smallButton(ctx.activationUrl(), "Escribir por WhatsApp", GREEN));
+        }
+        return html.append("</div>").toString();
+    }
+
+    private static String printingTips(PackEdition edition) {
+        String answers = edition == PackEdition.PROFESIONALES ? "el solucionario" : "las respuestas";
+        return PackEmailHtml.sectionTitle("Para imprimir")
+                + PackEmailHtml.tip(1, "Empezá acá.", "Abrí «Empezá acá», las primeras páginas del Pack completo: qué trae, "
+                        + "por dónde empezar y cómo imprimir.")
+                + PackEmailHtml.tip(2, "A una sola cara.", "La guía trae " + answers + " y no tiene que quedar en el dorso de la hoja de trabajo.")
+                + PackEmailHtml.tip(3, "Con tinta negra alcanza.", "Las fichas están pensadas para verse bien en blanco y negro.")
+                + "<div style=\"height:14px;line-height:14px;font-size:0;\">&nbsp;</div>";
+    }
+
+    private static String helpLine(Context ctx) {
+        String help = ctx.helpUrl() == null
+                ? "¿Necesitás ayuda? Escribinos desde " + PackEmailHtml.link(PackEmailHtml.SITE_URL, "tiamdigital.com") + "."
+                : "¿Necesitás ayuda? " + PackEmailHtml.link(esc(ctx.helpUrl()), "Escribinos por WhatsApp") + ".";
+        return "¿Lo perdiste? " + PackEmailHtml.link(esc(ctx.recoverLink()), "Pedí un link nuevo") + ". " + help;
+    }
+
+    private static String productAlt(PackEdition edition) {
+        return edition == PackEdition.PROFESIONALES
+                ? "Pack Básico de TIAM, edición para profesionales: 12 cuadernillos y 120 fichas para imprimir"
+                : "Pack Básico de TIAM, edición para familias: 120 fichas para imprimir, con una guía para acompañar";
+    }
+
+    // ---- the first email, plain text -----------------------------------------------------------------
+
+    private String renderText(PackOrder order, String link, Context ctx, String gamesUrl) {
+        PackEdition edition = order.getEdition();
+        StringBuilder text = new StringBuilder();
+        text.append(ctx.greeting()).append("\n\n");
+        text.append("¡Gracias por tu compra! Tu Pack TIAM (Edición ").append(edition.displayName())
+                .append(") ya está listo para descargar.\n");
+        text.append("\nDESCARGAR MIS ARCHIVOS\n").append(link).append("\n\n");
+
+        text.append("TUS ARCHIVOS (cada uno en A4 y en Carta; si dudás, A4)\n");
+        text.append("- Pack completo (PDF, ").append(sizeMb(edition, "pack-completo-a4"))
+                .append(" MB): «Empezá acá» y los 12 cuadernillos.\n");
+        text.append("- Cuadernillos sueltos (ZIP, ").append(sizeMb(edition, "cuadernillos-a4"))
+                .append(" MB): para imprimir de a uno.\n");
+        if (order.isWithExtra()) {
+            text.append("- Cuadernillo extra (PDF, ").append(sizeMb(edition, "extra-a4")).append(" MB): 40 fichas más.\n");
+        }
+        text.append("\n");
+
+        if (order.isWithGames()) {
+            appendGamesText(text, gamesUrl, ctx.activationUrl());
+        }
+
+        text.append("PARA IMPRIMIR\n");
+        text.append("1. Empezá acá: abrí «Empezá acá», las primeras páginas del Pack completo.\n");
+        text.append("2. A una sola cara: la guía trae ")
+                .append(edition == PackEdition.PROFESIONALES ? "el solucionario" : "las respuestas")
+                .append(" y no tiene que quedar en el dorso de la hoja de trabajo.\n");
+        text.append("3. Con tinta negra alcanza: las fichas se ven bien en blanco y negro.\n\n");
+
+        text.append("TU ACCESO\n");
+        text.append("- Tu acceso a las descargas dura ").append(properties.getAccessDays()).append(" días desde hoy.\n");
+        text.append("- Este link es personal: no lo compartas. Si lo perdés, pedí uno nuevo acá: ").append(ctx.recoverLink()).append("\n");
+        text.append(ctx.helpUrl() == null
+                ? "- ¿Necesitás ayuda? Escribinos desde tiamdigital.com.\n"
+                : "- ¿Necesitás ayuda? Escribinos por WhatsApp: " + ctx.helpUrl() + "\n");
+        text.append(footerText());
+        return text.toString();
+    }
+
+    private static void appendGamesText(StringBuilder text, String gamesUrl, String activationUrl) {
+        text.append("MES DE JUEGOS\n");
+        if (gamesUrl != null) {
+            text.append("Tu mes de juegos del Desafío 30 días está activo. Entrá desde tu link personal:\n")
+                    .append(gamesUrl).append("\n");
+            text.append("Para recibir los ejercicios por WhatsApp, escribinos desde el mismo número que dejaste al comprar.\n");
+        } else {
+            text.append("Tu mes de juegos del Desafío 30 días está incluido. Para activarlo, escribinos por "
+                    + "WhatsApp desde el mismo número que dejaste al comprar: te llega el primer ejercicio.\n");
+        }
+        if (activationUrl != null) {
+            text.append("WhatsApp: ").append(activationUrl).append("\n");
+        }
+        text.append("\n");
+    }
+
+    private static String footerText() {
+        return "\nTIAM · tiamdigital.com\n"
+                + "Material de estimulación cognitiva. No reemplaza la evaluación ni el tratamiento de un profesional de la salud.\n";
+    }
+
+    // ---- the "I lost my link" email ----------------------------------------------------------------------
 
     /**
      * The "I lost my link" email: ONE message with one section per paid order of that address (a buyer of both
@@ -77,11 +260,89 @@ public class PackAccessEmailComposer {
      * @param idempotencyKey supplied by the caller (it must change between requests or the provider drops them)
      */
     public EmailMessage composeResend(String to, List<ResendEntry> entries, String idempotencyKey) {
-        String name = firstName(entries.get(0).order().getBuyerName());
-        String recoverLink = recoverLink();
-        return new EmailMessage(to, SUBJECT_RESEND, renderResendHtml(name, entries, recoverLink),
-                renderResendText(name, entries, recoverLink), idempotencyKey);
+        Context ctx = context(entries.get(0).order().getBuyerName());
+        return new EmailMessage(to, SUBJECT_RESEND, renderResendHtml(entries, ctx), renderResendText(entries, ctx), idempotencyKey);
     }
+
+    private String renderResendHtml(List<ResendEntry> entries, Context ctx) {
+        boolean single = entries.size() == 1;
+        String days = String.valueOf(properties.getAccessDays());
+
+        String intro = "<strong style=\"color:#FFFFFF;\">" + esc(ctx.greeting()) + "</strong> pediste el acceso a tu Pack TIAM de nuevo. "
+                + "Acá tenés " + (single ? "tu link" : "tus links") + ".";
+        StringBuilder rows = new StringBuilder();
+        rows.append(PackEmailHtml.hero("PACK TIAM", "Tu acceso al Pack TIAM", intro, ""));
+        if (single) {
+            PackEdition edition = entries.get(0).order().getEdition();
+            rows.append(PackEmailHtml.productImage(ctx.assetsBase() + "/pack-" + edition.slug() + ".jpg", productAlt(edition)));
+        }
+
+        StringBuilder content = new StringBuilder();
+        for (ResendEntry entry : entries) {
+            PackOrder order = entry.order();
+            String link = downloadBase() + "/" + entry.token();
+            String label = single ? CTA_LABEL : "Descargar Edición " + esc(order.getEdition().displayName());
+            content.append(PackEmailHtml.button(link, label, ORANGE));
+            content.append("<p class=\"tx-muted\" style=\"margin:14px 0 26px 0;font-size:14px;line-height:21px;color:#4F5F76;\">"
+                    + "¿No abre el botón? Copiá este link en tu navegador:<br>"
+                    + PackEmailHtml.breakingLink(esc(link), esc(link)) + "</p>");
+            String gamesUrl = order.isWithGames() ? usableGamesLink(entry.gamesLink()) : null;
+            content.append(filesPanel(order, gamesUrl, ctx));
+        }
+        content.append(PackEmailHtml.sectionTitle("Importante"));
+        content.append(PackEmailHtml.tip(1, "Tu link anterior sigue funcionando",
+                "hasta que abras uno de estos; en ese momento deja de funcionar."));
+        content.append(PackEmailHtml.tip(2, "Si vos no pediste este mensaje,", "no hagas nada: tu acceso actual no se modificó."));
+        content.append(PackEmailHtml.tip(3, "Tu acceso dura " + days + " días", "desde que abras el link nuevo."));
+        content.append(PackEmailHtml.ruleThen(PackEmailHtml.muted("Estos links son personales: no los compartas. "
+                + "Si necesitás otro, " + PackEmailHtml.link(esc(ctx.recoverLink()), "pedilo acá") + ". "
+                + (ctx.helpUrl() == null ? "" : PackEmailHtml.link(esc(ctx.helpUrl()), "¿Necesitás ayuda? Escribinos por WhatsApp") + "."))));
+        rows.append(PackEmailHtml.body(content.toString()));
+
+        return PackEmailHtml.page("Tu acceso al Pack TIAM", "Tu link nuevo para descargar tus archivos del Pack TIAM.",
+                ctx.assetsBase() + "/" + LOGO_FILE, LOGO_WIDTH, LOGO_HEIGHT, rows.toString());
+    }
+
+    private String renderResendText(List<ResendEntry> entries, Context ctx) {
+        StringBuilder text = new StringBuilder();
+        text.append(ctx.greeting()).append("\n\n");
+        text.append("Pediste el acceso a tu Pack TIAM de nuevo. Acá tenés ")
+                .append(entries.size() == 1 ? "tu link" : "tus links").append(":\n\n");
+        for (ResendEntry entry : entries) {
+            PackOrder order = entry.order();
+            PackEdition edition = order.getEdition();
+            text.append("Edición ").append(edition.displayName()).append(":\n")
+                    .append(downloadBase()).append("/").append(entry.token()).append("\n");
+            text.append("Incluye el pack completo (").append(sizeMb(edition, "pack-completo-a4")).append(" MB) y los cuadernillos sueltos (")
+                    .append(sizeMb(edition, "cuadernillos-a4")).append(" MB), en A4 y en Carta");
+            if (order.isWithExtra()) {
+                text.append(", y el Cuadernillo extra (").append(sizeMb(edition, "extra-a4")).append(" MB)");
+            }
+            text.append(".\n");
+            if (order.isWithGames()) {
+                String gamesUrl = usableGamesLink(entry.gamesLink());
+                text.append(gamesUrl != null
+                        ? "Tu mes de juegos del Desafío 30 días: " + gamesUrl + "\n"
+                        : "Tu mes de juegos del Desafío 30 días está incluido: escribinos por WhatsApp para activarlo.\n");
+                if (ctx.activationUrl() != null) {
+                    text.append("WhatsApp: ").append(ctx.activationUrl()).append("\n");
+                }
+            }
+            text.append("\n");
+        }
+        text.append("IMPORTANTE\n");
+        text.append("- Tu link anterior sigue funcionando hasta que abras uno de estos; en ese momento deja de funcionar.\n");
+        text.append("- Si vos no pediste este mensaje, no hagas nada: tu acceso actual no se modificó.\n");
+        text.append("- Tu acceso dura ").append(properties.getAccessDays()).append(" días desde que abras el link nuevo.\n");
+        text.append("- Estos links son personales: no los compartas. Para pedir otro: ").append(ctx.recoverLink()).append("\n");
+        if (ctx.helpUrl() != null) {
+            text.append("- ¿Necesitás ayuda? Escribinos por WhatsApp: ").append(ctx.helpUrl()).append("\n");
+        }
+        text.append(footerText());
+        return text.toString();
+    }
+
+    // ---- links and assets ------------------------------------------------------------------------------
 
     /** The configured downloads base, trimmed and without trailing slashes ("" if unset). */
     String downloadBase() {
@@ -94,6 +355,17 @@ public class PackAccessEmailComposer {
 
     private String recoverLink() {
         return stripTrailingSlashes(properties.getLandingBaseUrl()) + "/pack/recuperar";
+    }
+
+    /**
+     * Where the email images are served from: the configured folder when it is public https (or, in dev mode, this
+     * machine, so a local test can show them), otherwise the production default. An image URL that a buyer's
+     * phone cannot open would turn the email into a page of empty boxes.
+     */
+    String assetsBase() {
+        String configured = stripTrailingSlashes(properties.getEmailAssetsBaseUrl());
+        boolean usable = PackUrls.isPublicHttps(configured) || isDevLocalLink(configured);
+        return usable ? configured : DEFAULT_ASSETS_BASE_URL;
     }
 
     /** Whether the downloads base is something a buyer can open: https with a real host. */
@@ -138,13 +410,18 @@ public class PackAccessEmailComposer {
         }
     }
 
-    private String whatsAppUrl() {
+    private String whatsAppUrl(String prefilledText) {
         String number = whatsAppProperties.getBusinessNumber();
         if (!StringUtils.hasText(number)) {
             return null;
         }
-        String encoded = URLEncoder.encode(WHATSAPP_PREFILLED_TEXT, StandardCharsets.UTF_8).replace("+", "%20");
+        String encoded = URLEncoder.encode(prefilledText, StandardCharsets.UTF_8).replace("+", "%20");
         return "https://wa.me/" + number.trim() + "?text=" + encoded;
+    }
+
+    /** What the file weighs, taken from the catalog (the same number the downloads page shows). */
+    private static int sizeMb(PackEdition edition, String code) {
+        return PackCatalog.find(code, edition, true).map(PackFile::sizeMb).orElse(0);
     }
 
     private static String stripTrailingSlashes(String value) {
@@ -162,241 +439,4 @@ public class PackAccessEmailComposer {
         String first = buyerName.trim().split("\\s+")[0];
         return first.substring(0, 1).toUpperCase() + first.substring(1).toLowerCase();
     }
-
-    // ---- text version ----------------------------------------------------------------------------
-
-    private String renderText(PackOrder order, String link, String name, String recoverLink, String gamesUrl,
-            String whatsAppUrl) {
-        StringBuilder text = new StringBuilder();
-        text.append(name.isEmpty() ? "Hola," : "Hola " + name + ",").append("\n\n");
-        text.append("¡Gracias por tu compra! Tu Pack TIAM (Edición ").append(order.getEdition().displayName())
-                .append(") ya está listo para descargar.\n");
-        text.append("\nDescargá tus archivos desde este link:\n").append(link).append("\n\n");
-
-        text.append("QUÉ INCLUYE\n");
-        text.append("- El pack completo en un solo PDF y los cuadernillos sueltos en un ZIP, en papel A4 y en Carta.\n");
-        if (order.isWithExtra()) {
-            text.append("- El Cuadernillo extra (PDF), también en A4 y en Carta.\n");
-        }
-        text.append("\n");
-
-        if (order.isWithGames()) {
-            text.append("MES DE JUEGOS\n");
-            if (gamesUrl != null) {
-                text.append("Tu mes de juegos del Desafío 30 días está activo. Entrá desde tu link personal:\n")
-                        .append(gamesUrl).append("\n");
-            } else {
-                text.append("Tu mes de juegos del Desafío 30 días está incluido. Para activarlo, escribinos por "
-                        + "WhatsApp desde el mismo número que dejaste al comprar.\n");
-            }
-            if (whatsAppUrl != null) {
-                text.append("WhatsApp: ").append(whatsAppUrl).append("\n");
-            }
-            text.append("\n");
-        }
-
-        text.append("CÓMO FUNCIONA\n");
-        text.append("- Elegí tu papel (A4 o Carta) y descargá. Podés imprimirlo todas las veces que quieras.\n");
-        text.append("- Tu acceso a las descargas dura ").append(properties.getAccessDays()).append(" días desde hoy.\n");
-        text.append("- Este link es personal: no lo compartas. Si lo perdés, pedí uno nuevo acá: ").append(recoverLink).append("\n\n");
-        text.append("TIAM Digital — estimulación cognitiva\n");
-        return text.toString();
-    }
-
-    // ---- html version ----------------------------------------------------------------------------
-
-    private String renderHtml(PackOrder order, String link, String name, String recoverLink, String gamesUrl,
-            String whatsAppUrl) {
-        Map<String, String> values = new HashMap<>();
-        values.put("TITLE", "¡Tu Pack TIAM está listo!");
-        values.put("GREETING", escape(name.isEmpty() ? "Hola," : "Hola " + name + ","));
-        values.put("INTRO", "¡Gracias por tu compra! Tu Pack TIAM (Edición " + escape(order.getEdition().displayName())
-                + ") ya está listo para descargar.");
-        values.put("LINK", escape(link));
-        values.put("EXTRA_ITEM", order.isWithExtra()
-                ? "<li style=\"margin-bottom:10px;\">El <strong>Cuadernillo extra</strong> (PDF), también en A4 y en Carta.</li>"
-                : "");
-        values.put("GAMES_BLOCK", order.isWithGames() ? gamesBlock(gamesUrl, whatsAppUrl) : "");
-        values.put("ACCESS_DAYS", String.valueOf(properties.getAccessDays()));
-        values.put("RECOVER_LINK", escape(recoverLink));
-        return fill(HTML_TEMPLATE, values);
-    }
-
-    private static String gamesBlock(String gamesUrl, String whatsAppUrl) {
-        StringBuilder html = new StringBuilder();
-        html.append("<h2 style=\"margin:0 0 12px 0;font-size:22px;line-height:1.3;color:#15436F;\">Tu mes de juegos</h2>\n");
-        if (gamesUrl != null) {
-            html.append("<p style=\"margin:0 0 16px 0;\">Tu mes de juegos del Desafío 30 días está activo. Entrá desde tu link personal:</p>\n");
-            html.append("<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" style=\"margin:0 0 16px 0;\"><tr>"
-                    + "<td style=\"background:#1B6FC4;border-radius:8px;\">"
-                    + "<a href=\"").append(escape(gamesUrl)).append("\" style=\"display:inline-block;padding:16px 28px;"
-                    + "font-family:Arial,Helvetica,sans-serif;font-size:20px;font-weight:bold;color:#FFFFFF;"
-                    + "text-decoration:none;\">Abrir mi mes de juegos</a></td></tr></table>\n");
-            html.append("<p style=\"margin:0 0 16px 0;font-size:16px;\"><a href=\"").append(escape(gamesUrl))
-                    .append("\" style=\"color:#15436F;word-break:break-all;\">").append(escape(gamesUrl)).append("</a></p>\n");
-        } else {
-            html.append("<p style=\"margin:0 0 16px 0;\">Tu mes de juegos del Desafío 30 días está incluido. "
-                    + "Para activarlo, escribinos por WhatsApp desde el mismo número que dejaste al comprar.</p>\n");
-        }
-        if (whatsAppUrl != null) {
-            html.append("<p style=\"margin:0 0 32px 0;\"><a href=\"").append(escape(whatsAppUrl))
-                    .append("\" style=\"color:#15436F;font-size:18px;font-weight:bold;text-decoration:underline;\">"
-                            + "Escribir por WhatsApp</a></p>\n");
-        }
-        return html.toString();
-    }
-
-    // ---- "I lost my link" email -------------------------------------------------------------------
-
-    private String renderResendText(String name, List<ResendEntry> entries, String recoverLink) {
-        StringBuilder text = new StringBuilder();
-        text.append(name.isEmpty() ? "Hola," : "Hola " + name + ",").append("\n\n");
-        text.append("Pediste el acceso a tu Pack TIAM de nuevo. Acá tenés ")
-                .append(entries.size() == 1 ? "tu link" : "tus links").append(":\n\n");
-        for (ResendEntry entry : entries) {
-            text.append("Edición ").append(entry.order().getEdition().displayName()).append(":\n")
-                    .append(downloadBase()).append("/").append(entry.token()).append("\n");
-            if (entry.order().isWithGames()) {
-                String gamesUrl = usableGamesLink(entry.gamesLink());
-                text.append(gamesUrl != null
-                        ? "Tu mes de juegos del Desafío 30 días: " + gamesUrl + "\n"
-                        : "Tu mes de juegos del Desafío 30 días está incluido: escribinos por WhatsApp para activarlo.\n");
-            }
-            text.append("\n");
-        }
-        text.append("IMPORTANTE\n");
-        text.append("- Tu link anterior sigue funcionando hasta que abras uno de estos; en ese momento deja de funcionar.\n");
-        text.append("- Si vos no pediste este mensaje, no hagas nada: tu acceso actual no se modificó.\n");
-        text.append("- Tu acceso dura ").append(properties.getAccessDays()).append(" días desde que abras el link nuevo.\n");
-        text.append("- Estos links son personales: no los compartas. Para pedir otro: ").append(recoverLink).append("\n\n");
-        text.append("TIAM Digital — estimulación cognitiva\n");
-        return text.toString();
-    }
-
-    private String renderResendHtml(String name, List<ResendEntry> entries, String recoverLink) {
-        StringBuilder sections = new StringBuilder();
-        for (ResendEntry entry : entries) {
-            String link = downloadBase() + "/" + entry.token();
-            sections.append("<h2 style=\"margin:0 0 12px 0;font-size:22px;line-height:1.3;color:#15436F;\">Edición ")
-                    .append(escape(entry.order().getEdition().displayName())).append("</h2>\n");
-            sections.append("<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" style=\"margin:0 0 12px 0;\"><tr>"
-                    + "<td style=\"background:#1B6FC4;border-radius:8px;\"><a href=\"").append(escape(link))
-                    .append("\" style=\"display:inline-block;padding:18px 32px;font-family:Arial,Helvetica,sans-serif;"
-                            + "font-size:22px;font-weight:bold;color:#FFFFFF;text-decoration:none;\">Ir a mis descargas</a>"
-                            + "</td></tr></table>\n");
-            sections.append("<p style=\"margin:0 0 24px 0;font-size:16px;\">Si el botón no se abre, copiá este link:<br>"
-                    + "<a href=\"").append(escape(link)).append("\" style=\"color:#15436F;word-break:break-all;\">")
-                    .append(escape(link)).append("</a></p>\n");
-            if (entry.order().isWithGames()) {
-                sections.append(gamesBlock(usableGamesLink(entry.gamesLink()), whatsAppUrl()));
-            }
-        }
-        Map<String, String> values = new HashMap<>();
-        values.put("TITLE", "Tu acceso al Pack TIAM");
-        values.put("GREETING", escape(name.isEmpty() ? "Hola," : "Hola " + name + ","));
-        values.put("INTRO", "Pediste el acceso a tu Pack TIAM de nuevo. Acá tenés "
-                + (entries.size() == 1 ? "tu link" : "tus links") + ".");
-        values.put("SECTIONS", sections.toString());
-        values.put("ACCESS_DAYS", String.valueOf(properties.getAccessDays()));
-        values.put("RECOVER_LINK", escape(recoverLink));
-        return fill(RESEND_HTML_TEMPLATE, values);
-    }
-
-    /** Single-pass substitution, so a value can never be re-interpreted as a placeholder. */
-    private static String fill(String template, Map<String, String> values) {
-        return PLACEHOLDER.matcher(template)
-                .replaceAll(match -> Matcher.quoteReplacement(values.getOrDefault(match.group(1), "")));
-    }
-
-    private static String escape(String value) {
-        return HtmlUtils.htmlEscape(value);
-    }
-
-    private static final String HTML_TEMPLATE = """
-            <!DOCTYPE html>
-            <html lang="es-AR">
-            <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1">
-              <title>Tu Pack TIAM</title>
-            </head>
-            <body style="margin:0;padding:0;background:#F4F7FB;">
-              <div style="display:none;max-height:0;overflow:hidden;">Tus PDF imprimibles están listos para descargar.</div>
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F4F7FB;">
-                <tr>
-                  <td align="center" style="padding:24px 12px;">
-                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#FFFFFF;border-radius:8px;">
-                      <tr>
-                        <td style="padding:32px 28px;font-family:Arial,Helvetica,sans-serif;font-size:18px;line-height:1.6;color:#16263F;">
-                          <h1 style="margin:0 0 16px 0;font-size:28px;line-height:1.3;color:#15436F;">{{TITLE}}</h1>
-                          <p style="margin:0 0 16px 0;">{{GREETING}}</p>
-                          <p style="margin:0 0 24px 0;">{{INTRO}}</p>
-                          <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 16px 0;">
-                            <tr>
-                              <td style="background:#1B6FC4;border-radius:8px;">
-                                <a href="{{LINK}}" style="display:inline-block;padding:18px 32px;font-family:Arial,Helvetica,sans-serif;font-size:22px;font-weight:bold;color:#FFFFFF;text-decoration:none;">Ir a mis descargas</a>
-                              </td>
-                            </tr>
-                          </table>
-                          <p style="margin:0 0 32px 0;font-size:16px;">Si el botón no se abre, copiá este link y pegalo en tu navegador:<br>
-                            <a href="{{LINK}}" style="color:#15436F;word-break:break-all;">{{LINK}}</a></p>
-                          <h2 style="margin:0 0 12px 0;font-size:22px;line-height:1.3;color:#15436F;">Qué incluye</h2>
-                          <ul style="margin:0 0 32px 0;padding-left:24px;">
-                            <li style="margin-bottom:10px;">El <strong>pack completo</strong> en un solo PDF y los <strong>cuadernillos sueltos</strong> en un ZIP, en papel A4 y en Carta.</li>
-                            {{EXTRA_ITEM}}
-                          </ul>
-                          {{GAMES_BLOCK}}
-                          <h2 style="margin:0 0 12px 0;font-size:22px;line-height:1.3;color:#15436F;">Cómo funciona</h2>
-                          <ul style="margin:0 0 32px 0;padding-left:24px;">
-                            <li style="margin-bottom:10px;">Elegí tu papel (A4 o Carta) y descargá. Podés imprimirlo todas las veces que quieras.</li>
-                            <li style="margin-bottom:10px;">Tu acceso a las descargas dura <strong>{{ACCESS_DAYS}} días</strong> desde hoy.</li>
-                            <li style="margin-bottom:0;">Este link es personal: no lo compartas. Si lo perdés, <a href="{{RECOVER_LINK}}" style="color:#15436F;">pedí uno nuevo acá</a>.</li>
-                          </ul>
-                          <p style="margin:32px 0 0 0;font-size:16px;color:#5A6B82;">TIAM Digital — estimulación cognitiva</p>
-                        </td>
-                      </tr>
-                    </table>
-                  </td>
-                </tr>
-              </table>
-            </body>
-            </html>
-            """;
-
-    private static final String RESEND_HTML_TEMPLATE = """
-            <!DOCTYPE html>
-            <html lang="es-AR">
-            <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1">
-              <title>Tu acceso al Pack TIAM</title>
-            </head>
-            <body style="margin:0;padding:0;background:#F4F7FB;">
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F4F7FB;">
-                <tr>
-                  <td align="center" style="padding:24px 12px;">
-                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#FFFFFF;border-radius:8px;">
-                      <tr>
-                        <td style="padding:32px 28px;font-family:Arial,Helvetica,sans-serif;font-size:18px;line-height:1.6;color:#16263F;">
-                          <h1 style="margin:0 0 16px 0;font-size:28px;line-height:1.3;color:#15436F;">{{TITLE}}</h1>
-                          <p style="margin:0 0 16px 0;">{{GREETING}}</p>
-                          <p style="margin:0 0 24px 0;">{{INTRO}}</p>
-                          {{SECTIONS}}
-                          <h2 style="margin:0 0 12px 0;font-size:22px;line-height:1.3;color:#15436F;">Importante</h2>
-                          <ul style="margin:0 0 32px 0;padding-left:24px;">
-                            <li style="margin-bottom:10px;">Tu link anterior <strong>sigue funcionando</strong> hasta que abras uno de estos; en ese momento deja de funcionar.</li>
-                            <li style="margin-bottom:10px;">Si vos no pediste este mensaje, no hagas nada: tu acceso actual no se modificó.</li>
-                            <li style="margin-bottom:10px;">Tu acceso dura <strong>{{ACCESS_DAYS}} días</strong> desde que abras el link nuevo.</li>
-                            <li style="margin-bottom:0;">Estos links son personales: no los compartas. Si necesitás otro, <a href="{{RECOVER_LINK}}" style="color:#15436F;">pedilo acá</a>.</li>
-                          </ul>
-                          <p style="margin:32px 0 0 0;font-size:16px;color:#5A6B82;">TIAM Digital — estimulación cognitiva</p>
-                        </td>
-                      </tr>
-                    </table>
-                  </td>
-                </tr>
-              </table>
-            </body>
-            </html>
-            """;
 }
