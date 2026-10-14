@@ -10,9 +10,9 @@
         "title": "Pack imprimible - Edición Familias",
         "files": [
           { "key": "pack-completo-a4", "label": "Pack completo (1 PDF)", "paper": "A4", "sizeMb": 19 },
-          { "key": "cuadernillos-a4", "label": "Cuadernillos sueltos (ZIP)", "paper": "A4", "sizeMb": 32 },
+          { "key": "cuadernillos-a4", "label": "Cuadernillos sueltos (ZIP)", "paper": "A4", "sizeMb": 38 },
           { "key": "pack-completo-carta", "label": "Pack completo (1 PDF)", "paper": "Carta", "sizeMb": 19 },
-          { "key": "cuadernillos-carta", "label": "Cuadernillos sueltos (ZIP)", "paper": "Carta", "sizeMb": 32 }
+          { "key": "cuadernillos-carta", "label": "Cuadernillos sueltos (ZIP)", "paper": "Carta", "sizeMb": 38 }
         ]
       },
       {

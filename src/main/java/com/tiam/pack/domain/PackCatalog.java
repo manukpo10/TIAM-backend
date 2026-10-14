@@ -42,7 +42,7 @@ public final class PackCatalog {
             files.add(new PackFile("pack-completo-" + paper.slug(), PackProduct.PACK, paper,
                     "Pack completo (1 PDF)", "pack-completo.pdf", "completo", 19));
             files.add(new PackFile("cuadernillos-" + paper.slug(), PackProduct.PACK, paper,
-                    "Cuadernillos sueltos (ZIP)", "cuadernillos.zip", "cuadernillos", 32));
+                    "Cuadernillos sueltos (ZIP)", "cuadernillos.zip", "cuadernillos", 38));
         }
         return List.copyOf(files);
     }

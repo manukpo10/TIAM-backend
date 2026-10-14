@@ -25,6 +25,18 @@ class PackCatalogTest {
     }
 
     @Test
+    void shownSizes_matchWhatTheRealFilesWeigh() {
+        // The per-paper ZIP weighs 37.7 to 37.9 MB; showing 32 made buyers expect a lighter download than they get.
+        for (PackEdition edition : PackEdition.values()) {
+            for (String paper : List.of("a4", "carta")) {
+                assertThat(PackCatalog.find("pack-completo-" + paper, edition, true).orElseThrow().sizeMb()).isEqualTo(19);
+                assertThat(PackCatalog.find("cuadernillos-" + paper, edition, true).orElseThrow().sizeMb()).isEqualTo(38);
+                assertThat(PackCatalog.find("extra-" + paper, edition, true).orElseThrow().sizeMb()).isEqualTo(7);
+            }
+        }
+    }
+
+    @Test
     void storageKeys_areVersionedAndSeparatedByEditionAndPaper() {
         PackFile completo = PackCatalog.find("pack-completo-a4", PackEdition.FAMILIAS, false).orElseThrow();
         PackFile cuadernillos = PackCatalog.find("cuadernillos-carta", PackEdition.PROFESIONALES, false).orElseThrow();
