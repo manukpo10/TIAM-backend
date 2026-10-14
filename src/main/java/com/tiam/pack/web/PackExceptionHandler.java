@@ -3,6 +3,7 @@ package com.tiam.pack.web;
 import com.tiam.common.exception.BadRequestException;
 import com.tiam.common.exception.ResourceNotFoundException;
 import com.tiam.common.web.ApiError;
+import com.tiam.pack.service.PackDownloadLimitException;
 import com.tiam.pack.service.PackRateLimitedException;
 import com.tiam.pack.service.PackUnavailableException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -15,7 +16,6 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
-import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -57,11 +57,6 @@ public class PackExceptionHandler {
         return error(HttpStatus.BAD_REQUEST, "Bad Request", "Invalid request body", request, null);
     }
 
-    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
-    public ResponseEntity<ApiError> handleWrongMethod(HttpRequestMethodNotSupportedException ex, HttpServletRequest request) {
-        return error(HttpStatus.METHOD_NOT_ALLOWED, "Method Not Allowed", "Method not allowed", request, null);
-    }
-
     @ExceptionHandler(PackRateLimitedException.class)
     public ResponseEntity<ApiError> handleRateLimited(PackRateLimitedException ex, HttpServletRequest request) {
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
@@ -69,6 +64,18 @@ public class PackExceptionHandler {
                 .cacheControl(CacheControl.noStore())
                 .body(ApiError.of(429, "Too Many Requests", "Demasiados intentos. Esperá un momento y probá de nuevo.",
                         maskedPath(request)));
+    }
+
+    @ExceptionHandler(PackDownloadLimitException.class)
+    public ResponseEntity<ApiError> handleDownloadLimit(PackDownloadLimitException ex, HttpServletRequest request) {
+        boolean daily = ex.cap() == PackDownloadLimitException.Cap.DAILY;
+        String message = daily
+                ? "Llegaste al límite de descargas de hoy. Probá de nuevo mañana."
+                : "Llegaste al límite total de descargas de este pedido. Escribinos y lo revisamos.";
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(HttpHeaders.RETRY_AFTER, daily ? "3600" : "86400")
+                .cacheControl(CacheControl.noStore())
+                .body(ApiError.of(429, "Download Limit", message, maskedPath(request)));
     }
 
     @ExceptionHandler(PackUnavailableException.class)

@@ -1,0 +1,161 @@
+package com.tiam.pack.service;
+
+import com.tiam.challenge.service.ChallengePurchaseService;
+import com.tiam.common.exception.ResourceNotFoundException;
+import com.tiam.pack.config.PackProperties;
+import com.tiam.pack.domain.PackCatalog;
+import com.tiam.pack.domain.PackDownloadEvent;
+import com.tiam.pack.domain.PackFile;
+import com.tiam.pack.domain.PackOrder;
+import com.tiam.pack.domain.PackOrderStatus;
+import com.tiam.pack.domain.PackProduct;
+import com.tiam.pack.domain.PackTokens;
+import com.tiam.pack.dto.DownloadLinkResponse;
+import com.tiam.pack.dto.PackOrderResponse;
+import com.tiam.pack.repository.PackDownloadEventRepository;
+import com.tiam.pack.repository.PackOrderRepository;
+import com.tiam.pack.storage.PrivateFileStore;
+import com.tiam.pack.storage.StorageUnavailableException;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+/**
+ * The buyer's downloads page: what an order contains, and short-lived signed links for its files.
+ *
+ * <p>The token is the credential, so every "no" is the SAME {@link ResourceNotFoundException} (malformed,
+ * unknown, inactive, revoked, expired, a file the order did not buy) and its message never repeats the token.
+ * The one exception is deliberate: a known order that is still PENDING (or FAILED) says so, because the
+ * thank-you page polls it while the payment confirms; that reveals nothing to someone without the token.
+ *
+ * <p>Links are issued by POST, never by a GET that email scanners and link previewers could trigger, and each
+ * one is logged and counted against two caps (per 24 h and in total) that make sharing the token uneconomical.
+ */
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class PackDownloadService {
+
+    private static final Duration DAILY_WINDOW = Duration.ofHours(24);
+
+    private final PackOrderRepository orders;
+    private final PackDownloadEventRepository downloads;
+    private final PrivateFileStore store;
+    private final ChallengePurchaseService challengePurchases;
+    private final PackProperties properties;
+    private final Clock clock;
+
+    @Transactional(readOnly = true)
+    public PackOrderResponse view(String token) {
+        PackOrder order = findVisibleOrder(token);
+        switch (order.getStatus()) {
+            case PENDING, REVIEW -> {
+                return PackOrderResponse.withoutFiles("PENDING");
+            }
+            case FAILED -> {
+                return PackOrderResponse.withoutFiles("FAILED");
+            }
+            default -> {
+                // PAID: fall through to the full body, after the access window check below
+            }
+        }
+        requireOpenAccess(order);
+
+        List<PackOrderResponse.Item> items = new ArrayList<>();
+        items.add(item(order, PackProduct.PACK, "PACK", "Pack imprimible - Edición " + order.getEdition().displayName()));
+        if (order.isWithExtra()) {
+            items.add(item(order, PackProduct.EXTRA, "EXTRA", "Cuadernillo extra"));
+        }
+        PackOrderResponse.Games games = order.isWithGames()
+                ? new PackOrderResponse.Games(challengePurchases.findAccessLinkIfActive(order.getChallengePurchaseId()).orElse(null))
+                : null;
+        return PackOrderResponse.paid(firstName(order.getBuyerName()), order.getEdition().slug(), items, games,
+                order.getAccessExpiresAt());
+    }
+
+    @Transactional
+    public DownloadLinkResponse issueLink(String token, String fileCode) {
+        PackOrder order = findVisibleOrder(token);
+        if (order.getStatus() != PackOrderStatus.PAID) {
+            throw notFound();
+        }
+        requireOpenAccess(order);
+
+        PackFile file = PackCatalog.find(fileCode, order.getEdition(), order.isWithExtra()).orElseThrow(PackDownloadService::notFound);
+
+        PackProperties.Downloads caps = properties.getDownloads();
+        Instant since = clock.instant().minus(DAILY_WINDOW);
+        if (downloads.countByOrderIdAndCreatedAtAfter(order.getId(), since) >= caps.getDailyCap()) {
+            log.warn("Pack order id={} reached its daily download cap", order.getId());
+            throw new PackDownloadLimitException(PackDownloadLimitException.Cap.DAILY);
+        }
+        if (downloads.countByOrderId(order.getId()) >= caps.getTotalCap()) {
+            log.warn("Pack order id={} reached its total download cap", order.getId());
+            throw new PackDownloadLimitException(PackDownloadLimitException.Cap.TOTAL);
+        }
+
+        Duration ttl = Duration.ofSeconds(caps.getUrlTtlSeconds());
+        String url;
+        try {
+            url = store.signedDownloadUrl(file.storageKey(order.getCatalogVersion(), order.getEdition()), ttl,
+                    file.downloadFilename(order.getEdition()));
+        } catch (StorageUnavailableException e) {
+            log.error("Pack download link for order id={} could not be issued: {}", order.getId(), e.getMessage());
+            throw new PackUnavailableException("File storage is not available", e);
+        }
+
+        PackDownloadEvent event = new PackDownloadEvent();
+        event.setOrderId(order.getId());
+        event.setFileKey(file.code());
+        downloads.save(event);
+        log.info("Pack download link issued: order id={} file={}", order.getId(), file.code());
+
+        return new DownloadLinkResponse(url, ttl.getSeconds());
+    }
+
+    // ---------------------------------------------------------------------------------------------------
+
+    /** The order behind the token unless it must look like it does not exist. */
+    private PackOrder findVisibleOrder(String token) {
+        if (!PackTokens.looksValid(token)) {
+            throw notFound();
+        }
+        PackOrder order = orders.findByAccessTokenAndActivoTrue(token).orElseThrow(PackDownloadService::notFound);
+        if (order.getStatus() == PackOrderStatus.REVOKED) {
+            throw notFound();
+        }
+        return order;
+    }
+
+    private void requireOpenAccess(PackOrder order) {
+        if (!order.isDownloadable(clock.instant())) {
+            throw notFound();
+        }
+    }
+
+    private PackOrderResponse.Item item(PackOrder order, PackProduct product, String code, String title) {
+        List<PackOrderResponse.FileInfo> files = PackCatalog.filesFor(order.getEdition(), order.isWithExtra()).stream()
+                .filter(file -> file.product() == product)
+                .map(file -> new PackOrderResponse.FileInfo(file.code(), file.label(), file.paper().displayName(), file.sizeMb()))
+                .toList();
+        return new PackOrderResponse.Item(code, title, files);
+    }
+
+    private static String firstName(String buyerName) {
+        if (buyerName == null || buyerName.isBlank()) {
+            return "";
+        }
+        String first = buyerName.trim().split("\\s+")[0];
+        return first.substring(0, 1).toUpperCase() + first.substring(1).toLowerCase();
+    }
+
+    private static ResourceNotFoundException notFound() {
+        return new ResourceNotFoundException("Not found");
+    }
+}

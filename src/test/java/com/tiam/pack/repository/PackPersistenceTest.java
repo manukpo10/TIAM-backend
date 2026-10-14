@@ -2,6 +2,7 @@ package com.tiam.pack.repository;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.tiam.pack.domain.PackDownloadEvent;
 import com.tiam.pack.domain.PackEdition;
 import com.tiam.pack.domain.PackOrder;
 import com.tiam.pack.domain.PackOrderStatus;
@@ -47,6 +48,7 @@ class PackPersistenceTest {
     }
 
     @Autowired PackOrderRepository orders;
+    @Autowired PackDownloadEventRepository downloads;
     @Autowired TestEntityManager em;
 
     @Test
@@ -172,6 +174,33 @@ class PackPersistenceTest {
 
         assertThat(ids).contains(waiting.getId())
                 .doesNotContain(justPaid.getId(), tooOld.getId(), alreadySent.getId(), pending.getId());
+    }
+
+    @Test
+    void downloadEvents_areCountedPerOrderAndPerWindow() {
+        PackOrder mine = paid("dl@example.com", 60);
+        PackOrder other = paid("dl-other@example.com", 60);
+        event(mine, "pack-completo-a4");
+        event(mine, "cuadernillos-a4");
+        PackDownloadEvent old = event(mine, "pack-completo-carta");
+        event(other, "pack-completo-a4");
+        em.getEntityManager()
+                .createNativeQuery("update pack_download_events set created_at = now() - interval '2 days' where id = ?1")
+                .setParameter(1, old.getId())
+                .executeUpdate();
+        em.clear();
+
+        assertThat(downloads.countByOrderId(mine.getId())).isEqualTo(3);
+        assertThat(downloads.countByOrderIdAndCreatedAtAfter(mine.getId(), Instant.now().minus(24, ChronoUnit.HOURS)))
+                .isEqualTo(2);
+        assertThat(downloads.countByOrderId(other.getId())).isEqualTo(1);
+    }
+
+    private PackDownloadEvent event(PackOrder order, String fileKey) {
+        PackDownloadEvent event = new PackDownloadEvent();
+        event.setOrderId(order.getId());
+        event.setFileKey(fileKey);
+        return downloads.saveAndFlush(event);
     }
 
     private PackOrder paid(String email, long paidMinutesAgo) {

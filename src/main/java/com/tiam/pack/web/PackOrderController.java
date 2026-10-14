@@ -4,7 +4,10 @@ import com.tiam.common.web.ApiResponse;
 import com.tiam.pack.config.PackProperties;
 import com.tiam.pack.domain.PackOrderStatus;
 import com.tiam.pack.dto.ConfirmPaymentRequest;
+import com.tiam.pack.dto.DownloadLinkResponse;
 import com.tiam.pack.dto.OrderStatusResponse;
+import com.tiam.pack.dto.PackOrderResponse;
+import com.tiam.pack.service.PackDownloadService;
 import com.tiam.pack.service.PackPaymentConfirmationService;
 import com.tiam.pack.service.PackRateLimitedException;
 import com.tiam.pack.service.PackRateLimiter;
@@ -14,6 +17,7 @@ import java.time.Duration;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -31,8 +35,30 @@ import org.springframework.web.bind.annotation.RestController;
 public class PackOrderController {
 
     private final PackPaymentConfirmationService confirmationService;
+    private final PackDownloadService downloadService;
     private final PackRateLimiter rateLimiter;
     private final PackProperties properties;
+
+    /**
+     * The downloads / thank-you page. PAID with a valid access window returns the full body; PENDING and
+     * FAILED return only their status; anything else (unknown, revoked, expired) is one uniform 404.
+     */
+    @GetMapping("/{token}")
+    public ResponseEntity<ApiResponse<PackOrderResponse>> get(@PathVariable String token, HttpServletRequest http) {
+        limit(http);
+        return tokenResponse(downloadService.view(token));
+    }
+
+    /**
+     * Issues a signed URL (valid a few minutes) for one file of the order and logs it. POST on purpose: link
+     * scanners in email clients follow GETs and would burn the download caps without a person clicking.
+     */
+    @PostMapping("/{token}/files/{fileKey}/link")
+    public ResponseEntity<ApiResponse<DownloadLinkResponse>> issueLink(
+            @PathVariable String token, @PathVariable String fileKey, HttpServletRequest http) {
+        limit(http);
+        return tokenResponse(downloadService.issueLink(token, fileKey));
+    }
 
     /**
      * The return page calls this once with the {@code payment_id} Mercado Pago put in the return URL. The
