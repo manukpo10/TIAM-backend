@@ -85,7 +85,7 @@ class ChallengePurchaseServiceBundleTest {
         when(repository.findByPhoneAndActivoTrue(PHONE)).thenReturn(List.of());
         when(repository.save(any(ChallengePurchase.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        ChallengePurchase granted = service.grantBundledMonth("Ana Gómez", "221 123-4567", "ana@example.com").orElseThrow();
+        ChallengePurchase granted = service.grantBundledMonth("Ana Gómez", PHONE, "ana@example.com").orElseThrow();
 
         assertThat(granted.getStatus()).isEqualTo(ChallengePurchaseStatus.PAID);
         assertThat(granted.getChallengeMonth()).isEqualTo(1);
@@ -128,11 +128,26 @@ class ChallengePurchaseServiceBundleTest {
     }
 
     @Test
-    void grantBundledMonth_withoutAUsablePhone_isRefused() {
-        assertThatThrownBy(() -> service.grantBundledMonth("Ana", "12", "ana@example.com"))
-                .isInstanceOf(BadRequestException.class);
-        assertThatThrownBy(() -> service.grantBundledMonth("Ana", null, "ana@example.com"))
-                .isInstanceOf(BadRequestException.class);
+    void grantBundledMonth_withoutAUsablePhone_returnsEmptyInsteadOfThrowing() {
+        // Throwing would mark the pack order's payment transaction rollback-only.
+        assertThat(service.grantBundledMonth("Ana", "12", "ana@example.com")).isEmpty();
+        assertThat(service.grantBundledMonth("Ana", null, "ana@example.com")).isEmpty();
+        assertThat(service.grantBundledMonth("Ana", "", "ana@example.com")).isEmpty();
+
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    void grantBundledMonth_usesTheStoredPhoneAsIs_withoutNormalisingItASecondTime() {
+        // PhoneNumberUtil.normalize is not idempotent: 549123456789 would lose another "9" and become
+        // unusable. The phone on a pack order is already normalised, so it must not go through it again.
+        when(repository.findByPhoneAndActivoTrue("549123456789")).thenReturn(List.of());
+        when(repository.save(any(ChallengePurchase.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ChallengePurchase granted = service.grantBundledMonth("Ana", "549123456789", "ana@example.com").orElseThrow();
+
+        assertThat(granted.getPhone()).isEqualTo("549123456789");
+        assertThat(granted.getChallengeMonth()).isEqualTo(1);
     }
 
     // --- deactivate and link -----------------------------------------------------------------------

@@ -232,19 +232,22 @@ public class ChallengePurchaseService {
      * <p>Not idempotent by itself: the pack order remembers the purchase it created
      * ({@code pack_orders.challenge_purchase_id}) and never calls this twice for one order.
      *
-     * @throws BadRequestException if the phone is unusable (the pack checkout validates it up front)
+     * <p>The phone must ALREADY be normalised ({@code pack_orders.phone} is): {@link PhoneNumberUtil#normalize}
+     * is not idempotent, so running it a second time can turn a valid stored number into an unusable one. An
+     * unusable phone also returns empty rather than throwing, for the same rollback-only reason.
      */
     @Transactional
-    public Optional<ChallengePurchase> grantBundledMonth(String buyerName, String rawPhone, String email) {
-        String normalizedPhone = PhoneNumberUtil.normalize(rawPhone);
-        if (normalizedPhone.isEmpty()) {
-            throw new BadRequestException("A valid phone number is required to grant a Desafío month");
+    public Optional<ChallengePurchase> grantBundledMonth(String buyerName, String normalizedPhone, String email) {
+        if (normalizedPhone == null || normalizedPhone.length() < 12) {
+            log.error("Cannot grant a bundled challenge month: the order has no usable phone");
+            return Optional.empty();
         }
         Object lock = autoAssignLocksByPhone.computeIfAbsent(normalizedPhone, key -> new Object());
         synchronized (lock) {
-            Optional<Integer> challengeMonth = firstUnpaidMonth(paidMonthsFor(normalizedPhone));
+            Optional<Integer> challengeMonth = firstUnpaidMonth(paidMonthsForNormalized(normalizedPhone));
             if (challengeMonth.isEmpty()) {
-                log.warn("Cannot grant a bundled challenge month: phone={} already has every month on sale", normalizedPhone);
+                log.warn("Cannot grant a bundled challenge month: phone ending {} already has every month on sale",
+                        lastDigits(normalizedPhone));
                 return Optional.empty();
             }
 
@@ -258,10 +261,14 @@ public class ChallengePurchaseService {
             purchase.setPurchaseDate(Instant.now());
             purchase = challengePurchaseRepository.save(purchase);
 
-            log.info("Granted challenge month={} to phone={} as part of a pack order (purchase id={})",
-                    challengeMonth.get(), normalizedPhone, purchase.getId());
+            log.info("Granted challenge month={} to phone ending {} as part of a pack order (purchase id={})",
+                    challengeMonth.get(), lastDigits(normalizedPhone), purchase.getId());
             return Optional.of(purchase);
         }
+    }
+
+    private static String lastDigits(String phone) {
+        return phone.length() <= 4 ? "****" : "****" + phone.substring(phone.length() - 4);
     }
 
     /**
@@ -356,7 +363,11 @@ public class ChallengePurchaseService {
         if (normalized.isEmpty()) {
             return Set.of();
         }
-        return challengePurchaseRepository.findByPhoneAndActivoTrue(normalized).stream()
+        return paidMonthsForNormalized(normalized);
+    }
+
+    private Set<Integer> paidMonthsForNormalized(String normalizedPhone) {
+        return challengePurchaseRepository.findByPhoneAndActivoTrue(normalizedPhone).stream()
                 .filter(p -> p.getStatus() == ChallengePurchaseStatus.PAID)
                 .map(ChallengePurchase::getChallengeMonth)
                 .collect(Collectors.toSet());
