@@ -8,12 +8,14 @@ import com.tiam.challenge.service.ChallengePurchaseService;
 import com.tiam.common.exception.ResourceNotFoundException;
 import com.tiam.pack.domain.PackExternalReference;
 import com.tiam.pack.service.PackOrderService;
+import com.tiam.pack.service.PackRateLimiter;
 import com.tiam.pack.service.PaymentSnapshot;
 import com.tiam.subscription.config.MercadoPagoProperties;
 import com.tiam.subscription.service.MercadoPagoService;
 import com.tiam.subscription.service.SubscriptionService;
 import jakarta.servlet.http.HttpServletRequest;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.HexFormat;
@@ -42,16 +44,29 @@ public class MercadoPagoWebhookController {
 
     // MP's x-signature header: "ts=1704908010,v1=618c85345248dd820d5fd456117c2ab2..."
     private static final Pattern SIGNATURE_HEADER_PATTERN = Pattern.compile("ts=(\\d+),v1=([0-9a-fA-F]+)");
+    private static final Pattern NUMERIC_ID = Pattern.compile("\\d{1,20}");
+    /** Unsigned (IPN) payment hints processed per minute, whoever sends them: each one costs a call to Mercado Pago. */
+    private static final int UNSIGNED_HINTS_PER_MINUTE = 120;
 
     private final MercadoPagoService mercadoPagoService;
     private final SubscriptionService subscriptionService;
     private final ChallengePurchaseService challengePurchaseService;
     private final MercadoPagoProperties mercadoPagoProperties;
     private final PackOrderService packOrderService;
+    private final PackRateLimiter rateLimiter;
 
     /**
      * Receives Mercado Pago IPN/webhook notifications.
      * Path: POST /webhooks/mercadopago
+     *
+     * <p><b>Two notification formats.</b> Webhooks ({@code type} + {@code data.id}, signed with
+     * {@code x-signature}) are validated against {@code MP_WEBHOOK_SECRET}. The older IPN format
+     * ({@code ?topic=payment&id=...}, what a per-preference {@code notification_url} may send) is documented by
+     * Mercado Pago as NOT validatable with the secret even though it carries the header; answering those with 401
+     * would drop every such payment. So, when a secret is set, an IPN-format notification is treated as an
+     * unauthenticated HINT: only {@code payment} with a numeric id is looked at, it is rate limited, and the
+     * payment is re-read from Mercado Pago, whose answer (never the notification) decides everything. Forging one
+     * can at most make us ask Mercado Pago about a payment.
      *
      * <p>Status code contract (MP retries on any non-200 response, so this matters):
      * <ul>
@@ -63,6 +78,7 @@ public class MercadoPagoWebhookController {
      *       dashboard sends simulated test notifications with fabricated ids).</li>
      *   <li><b>401</b> — signature validation failed; a forged/invalid request must not
      *       trigger MP retries.</li>
+     *   <li><b>429</b> — too many unsigned (IPN) hints in the last minute; non-200, so MP sends it again later.</li>
      *   <li><b>5xx</b> — a genuine transient/unexpected or operator-fixable failure (MP
      *       API 5xx/429, bad credentials, network error, DB error, unexpected
      *       RuntimeException) so MP retries the notification instead of us silently
@@ -87,7 +103,12 @@ public class MercadoPagoWebhookController {
         String notificationType = resolveType(payload, StringUtils.hasText(type) ? type : topic);
         String resourceId = resolveId(payload, StringUtils.hasText(id) ? id : dataId);
 
-        if (!isValidSignature(request, resourceId)) {
+        if (isIpnFormat(payload, type, topic) && StringUtils.hasText(mercadoPagoProperties.getWebhookSecret())) {
+            ResponseEntity<Void> refused = screenUnsignedHint(notificationType, resourceId);
+            if (refused != null) {
+                return refused;
+            }
+        } else if (!isValidSignature(request, resourceId)) {
             log.warn("MP webhook rejected: invalid signature (type={})", notificationType);
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
@@ -126,6 +147,28 @@ public class MercadoPagoWebhookController {
         }
 
         return ResponseEntity.ok().build();
+    }
+
+    /** IPN: {@code topic} + {@code id} and none of the webhook markers ({@code type}, a JSON body with a type). */
+    private static boolean isIpnFormat(Map<String, Object> body, String type, String topic) {
+        return StringUtils.hasText(topic)
+                && !StringUtils.hasText(type)
+                && !(body != null && body.containsKey("type"));
+    }
+
+    /** @return null to go on processing the hint, or the response to give instead (never a 401) */
+    private ResponseEntity<Void> screenUnsignedHint(String notificationType, String resourceId) {
+        if (!"payment".equals(notificationType) || !StringUtils.hasText(resourceId)
+                || !NUMERIC_ID.matcher(resourceId).matches()) {
+            log.info("MP IPN ignored (unsigned; only numeric payment ids are looked at): type={}", notificationType);
+            return ResponseEntity.ok().build();
+        }
+        if (!rateLimiter.tryAcquire("mp-unsigned-hint", UNSIGNED_HINTS_PER_MINUTE, Duration.ofMinutes(1))) {
+            log.warn("MP IPN hint refused for now: more than {} unsigned notifications in a minute", UNSIGNED_HINTS_PER_MINUTE);
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).build();
+        }
+        log.info("MP IPN accepted as an unsigned hint: payment {} will be re-read from Mercado Pago", resourceId);
+        return null;
     }
 
     /**

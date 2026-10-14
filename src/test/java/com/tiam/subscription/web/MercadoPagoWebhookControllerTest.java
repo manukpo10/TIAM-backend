@@ -59,7 +59,8 @@ class MercadoPagoWebhookControllerTest {
     @BeforeEach
     void setUp() {
         controller = new MercadoPagoWebhookController(
-                mercadoPagoService, subscriptionService, challengePurchaseService, mercadoPagoProperties, packOrderService);
+                mercadoPagoService, subscriptionService, challengePurchaseService, mercadoPagoProperties, packOrderService,
+                new com.tiam.pack.service.PackRateLimiter());
     }
 
     // --- signature validation ---------------------------------------------------
@@ -452,6 +453,151 @@ class MercadoPagoWebhookControllerTest {
     }
 
     // --- fixtures -------------------------------------------------------------
+
+    // --- IPN-format notifications (?topic=payment&id=...) ---------------------------------------
+    //
+    // Mercado Pago documents that IPN "despite receiving the x-Signature header, does not allow validation through
+    // the secret key". With MP_WEBHOOK_SECRET set, treating them like signed webhooks would answer 401 to every
+    // notification of a per-preference notification_url and lose them all. They are processed instead as a mere
+    // hint: the payment is ALWAYS re-read from Mercado Pago, so an unsigned notification cannot mark anything paid.
+
+    @Test
+    void ipn_withTheSecretConfigured_isNotRejected_theMpHeaderCannotBeValidatedAnyway() throws Exception {
+        when(mercadoPagoProperties.getWebhookSecret()).thenReturn(SECRET);
+        when(mercadoPagoService.isConfigured()).thenReturn(true);
+        Payment ipnPayment = packPayment("pack:42", "approved");
+        when(mercadoPagoService.getPayment("555")).thenReturn(ipnPayment);
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("x-signature", "ts=1704908010,v1=0123456789abcdef"); // present, but not ours to verify
+        request.addHeader("x-request-id", REQUEST_ID);
+
+        ResponseEntity<Void> response = controller.handleWebhook(null, null, "payment", "555", null, request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        ArgumentCaptor<PaymentSnapshot> snapshot = ArgumentCaptor.forClass(PaymentSnapshot.class);
+        verify(packOrderService).onPayment(org.mockito.ArgumentMatchers.eq(42L), snapshot.capture());
+        assertThat(snapshot.getValue().status()).isEqualTo("approved"); // Mercado Pago's word, from the re-read
+    }
+
+    @Test
+    void ipn_withoutAnySignatureHeader_isProcessedToo() throws Exception {
+        when(mercadoPagoProperties.getWebhookSecret()).thenReturn(SECRET);
+        when(mercadoPagoService.isConfigured()).thenReturn(true);
+        Payment ipnPayment = approvedPayment("42");
+        when(mercadoPagoService.getPayment("555")).thenReturn(ipnPayment);
+
+        ResponseEntity<Void> response = controller.handleWebhook(null, null, "payment", "555", null, new MockHttpServletRequest());
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        verify(challengePurchaseService).markPaid(42L, "555");
+    }
+
+    @Test
+    void ipn_cannotMarkAnythingPaidByItself_whatMercadoPagoSaysDecides() throws Exception {
+        when(mercadoPagoProperties.getWebhookSecret()).thenReturn(SECRET);
+        when(mercadoPagoService.isConfigured()).thenReturn(true);
+        Payment ipnPayment = paymentWithStatus("42", "pending");
+        when(mercadoPagoService.getPayment("555")).thenReturn(ipnPayment);
+
+        controller.handleWebhook(null, null, "payment", "555", null, new MockHttpServletRequest());
+
+        verify(mercadoPagoService).getPayment("555"); // always asked, never trusted
+        org.mockito.Mockito.verify(challengePurchaseService, org.mockito.Mockito.never()).markPaid(
+                org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void ipn_aForgedIdThatMercadoPagoDoesNotKnow_isJustAcknowledged() throws Exception {
+        when(mercadoPagoProperties.getWebhookSecret()).thenReturn(SECRET);
+        when(mercadoPagoService.isConfigured()).thenReturn(true);
+        when(mercadoPagoService.getPayment("123456789"))
+                .thenThrow(new MPApiException("Not Found", new MPResponse(404, null, null)));
+
+        ResponseEntity<Void> response = controller.handleWebhook(null, null, "payment", "123456789", null, new MockHttpServletRequest());
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        verifyNoInteractions(challengePurchaseService, packOrderService);
+    }
+
+    @Test
+    void ipn_withANonNumericId_isAcknowledgedWithoutAskingMercadoPagoAnything() {
+        when(mercadoPagoProperties.getWebhookSecret()).thenReturn(SECRET);
+
+        ResponseEntity<Void> response = controller.handleWebhook(null, null, "payment", "../../x", null, new MockHttpServletRequest());
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        verifyNoInteractions(mercadoPagoService, challengePurchaseService, packOrderService, subscriptionService);
+    }
+
+    @Test
+    void ipn_forAnythingButPayments_isAcknowledgedAndIgnored_whenUnsigned() {
+        when(mercadoPagoProperties.getWebhookSecret()).thenReturn(SECRET);
+
+        for (String topic : new String[] {"merchant_order", "subscription_preapproval", "chargebacks"}) {
+            ResponseEntity<Void> response = controller.handleWebhook(null, null, topic, "555", null, new MockHttpServletRequest());
+            assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        }
+
+        verifyNoInteractions(mercadoPagoService, subscriptionService, challengePurchaseService, packOrderService);
+    }
+
+    @Test
+    void ipn_unsignedProcessingIsRateLimited_soForgedHintsCannotHammerMercadoPago() throws Exception {
+        when(mercadoPagoProperties.getWebhookSecret()).thenReturn(SECRET);
+        when(mercadoPagoService.isConfigured()).thenReturn(true);
+        Payment ipnPayment = paymentWithStatus("42", "pending");
+        when(mercadoPagoService.getPayment("555")).thenReturn(ipnPayment);
+
+        ResponseEntity<Void> last = null;
+        for (int i = 0; i < 121; i++) {
+            last = controller.handleWebhook(null, null, "payment", "555", null, new MockHttpServletRequest());
+        }
+
+        assertThat(last.getStatusCode()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS); // non-200: MP retries later
+        verify(mercadoPagoService, org.mockito.Mockito.times(120)).getPayment("555");
+    }
+
+    @Test
+    void ipn_withoutTheSecret_behavesAsBefore_everyTopicIsProcessed() throws Exception {
+        when(mercadoPagoProperties.getWebhookSecret()).thenReturn(null);
+        when(mercadoPagoService.isConfigured()).thenReturn(true);
+        Payment ipnPayment = approvedPayment("42");
+        when(mercadoPagoService.getPayment("555")).thenReturn(ipnPayment);
+
+        controller.handleWebhook(null, null, "payment", "555", null, new MockHttpServletRequest());
+
+        verify(challengePurchaseService).markPaid(42L, "555");
+    }
+
+    @Test
+    void webhookFormat_withoutASignature_isStillRejected_whenTheSecretIsSet() {
+        when(mercadoPagoProperties.getWebhookSecret()).thenReturn(SECRET);
+
+        ResponseEntity<Void> response = controller.handleWebhook(null, "payment", null, null, "555", new MockHttpServletRequest());
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        verifyNoInteractions(mercadoPagoService, challengePurchaseService, packOrderService);
+    }
+
+    @Test
+    void webhookFormatInTheBody_withoutASignature_isStillRejected() {
+        when(mercadoPagoProperties.getWebhookSecret()).thenReturn(SECRET);
+        java.util.Map<String, Object> body = java.util.Map.of("type", "payment", "data", java.util.Map.of("id", "555"));
+
+        ResponseEntity<Void> response = controller.handleWebhook(body, null, null, null, null, new MockHttpServletRequest());
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+        verifyNoInteractions(mercadoPagoService, challengePurchaseService, packOrderService);
+    }
+
+    @Test
+    void aRequestThatHasBothTypeAndTopic_isAWebhook_notAnIpnLoophole() {
+        when(mercadoPagoProperties.getWebhookSecret()).thenReturn(SECRET);
+
+        ResponseEntity<Void> response = controller.handleWebhook(null, "payment", "payment", "555", null, new MockHttpServletRequest());
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
 
     /** Secret unset -> isValidSignature short-circuits to true regardless of headers. */
     private void givenNoSignatureCheck() {
