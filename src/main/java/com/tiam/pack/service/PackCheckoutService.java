@@ -6,6 +6,7 @@ import com.tiam.challenge.service.ChallengePurchaseService;
 import com.tiam.common.email.EmailAddresses;
 import com.tiam.common.util.PhoneNumberUtil;
 import com.tiam.pack.config.PackProperties;
+import com.tiam.pack.config.PackSalesReadiness;
 import com.tiam.pack.domain.PackEdition;
 import com.tiam.pack.domain.PackOrder;
 import com.tiam.pack.domain.PackOrderStatus;
@@ -64,6 +65,7 @@ public class PackCheckoutService {
     private final MercadoPagoService mercadoPago;
     private final ChallengePurchaseService challengePurchases;
     private final PackRateLimiter rateLimiter;
+    private final PackSalesReadiness readiness;
 
     /**
      * Serialises "look for a reusable checkout, else create one" per buyer, so a double click that
@@ -85,6 +87,13 @@ public class PackCheckoutService {
         if (!properties.isSalesEnabled()) {
             throw new PackCheckoutException(PackCheckoutError.CERRADO);
         }
+        // Fail closed: a sale that cannot be fulfilled (local file store, no real email, localhost URLs, nobody to
+        // tell about a problem) is refused BEFORE any order exists or any money is asked for.
+        List<String> notReady = readiness.problems();
+        if (!notReady.isEmpty()) {
+            log.error("Pack checkout REFUSED (sales are enabled but the shop is not ready): {}", notReady);
+            throw new PackCheckoutException(PackCheckoutError.CERRADO);
+        }
 
         String email = normalizeEmail(command.email());
         String name = normalizeName(command.name());
@@ -94,10 +103,6 @@ public class PackCheckoutService {
         String phone = normalizePhone(command.phone(), extras.games());
         PackPrice price = pricing.calculate(edition, extras);
         checkExpectedTotal(command.expectedTotal(), price);
-
-        if (extras.games() && !challengePurchases.hasMonthAvailable(phone)) {
-            throw new PackCheckoutException(PackCheckoutError.MESES);
-        }
 
         synchronized (emailLocks[Math.floorMod(email.hashCode(), LOCK_STRIPES)]) {
             Optional<PackOrder> reusable = orders.findReusable(email, edition, extras.games(), extras.extra(),
@@ -110,6 +115,12 @@ public class PackCheckoutService {
             }
 
             enforceLimits(email, command.clientIp());
+
+            // After the limits on purpose: asked before them, "?error=meses" would let anyone probe which phone
+            // numbers hold every Desafío month at no cost.
+            if (extras.games() && !challengePurchases.hasMonthAvailable(phone)) {
+                throw new PackCheckoutException(PackCheckoutError.MESES);
+            }
 
             if (!mercadoPago.isConfigured()) {
                 log.warn("Pack checkout refused: Mercado Pago is not configured (MP_ACCESS_TOKEN)");

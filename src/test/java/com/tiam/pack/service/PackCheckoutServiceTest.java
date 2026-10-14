@@ -15,6 +15,7 @@ import com.mercadopago.exceptions.MPApiException;
 import com.mercadopago.net.MPResponse;
 import com.tiam.challenge.service.ChallengePurchaseService;
 import com.tiam.pack.config.PackProperties;
+import com.tiam.pack.config.PackSalesReadiness;
 import com.tiam.pack.domain.PackEdition;
 import com.tiam.pack.domain.PackOrder;
 import com.tiam.pack.domain.PackOrderStatus;
@@ -45,6 +46,7 @@ class PackCheckoutServiceTest {
     PackProperties properties;
     MutableClock clock;
     PackRateLimiter limiter;
+    PackSalesReadiness readiness;
     PackCheckoutService service;
 
     @BeforeEach
@@ -55,8 +57,9 @@ class PackCheckoutServiceTest {
         properties.setThankyouUrl("https://tiamdigital.com/pack/gracias");
         clock = new MutableClock(Instant.parse("2026-10-14T12:00:00Z"));
         limiter = new PackRateLimiter(clock);
+        readiness = org.mockito.Mockito.mock(PackSalesReadiness.class); // ready: problems() is empty
         service = new PackCheckoutService(orders, new PackPricing(properties), properties, mercadoPago,
-                challengePurchases, limiter);
+                challengePurchases, limiter, readiness);
     }
 
     // --- the happy path ----------------------------------------------------------------
@@ -427,6 +430,29 @@ class PackCheckoutServiceTest {
                 .isInstanceOfSatisfying(PackCheckoutException.class, e -> assertThat(e.error()).isEqualTo(PackCheckoutError.LIMITE));
 
         verify(orders, never()).save(any());
+    }
+
+    @Test
+    void start_withSalesOnButTheShopNotReady_refusesAsClosedBeforeTouchingAnything() {
+        when(readiness.problems()).thenReturn(List.of("the private file store is not Cloudflare R2"));
+
+        assertThatThrownBy(() -> service.start(command().build()))
+                .isInstanceOfSatisfying(PackCheckoutException.class, e -> assertThat(e.error()).isEqualTo(PackCheckoutError.CERRADO));
+
+        verifyNoInteractions(orders, mercadoPago, challengePurchases);
+    }
+
+    @Test
+    void start_theGamesMonthCheckHappensAfterTheLimits_soItCannotBeProbedForFree() throws Exception {
+        properties.getRateLimits().setCheckoutPerIp(1);
+        givenMercadoPagoWorks();
+        service.start(command().email("first@example.com").build()); // spends the IP's only slot
+
+        assertThatThrownBy(() -> service.start(command().email("probe@example.com")
+                .extras(List.of("juegos")).phone("221 123-4567").build()))
+                .isInstanceOfSatisfying(PackCheckoutException.class, e -> assertThat(e.error()).isEqualTo(PackCheckoutError.LIMITE));
+
+        verifyNoInteractions(challengePurchases);
     }
 
     // --- Mercado Pago down --------------------------------------------------------------------

@@ -101,6 +101,13 @@ class ApplicationYamlTest {
     }
 
     @Test
+    void devMode_isOffByDefault_andNotListedInTheDeploymentBlueprint() throws Exception {
+        assertThat(yaml.getProperty("tiam.pack.dev-mode")).isEqualTo("${PACK_DEV_MODE:false}");
+        String blueprint = java.nio.file.Files.readString(java.nio.file.Path.of("render.yaml"));
+        assertThat(blueprint).doesNotContain("PACK_DEV_MODE");
+    }
+
+    @Test
     void clientIp_isConfigurableFromTheEnvironment_andSafeByDefault() {
         assertThat(yaml.getProperty("tiam.net.client-ip.header")).isEqualTo("${CLIENT_IP_HEADER:}");
         assertThat(yaml.getProperty("tiam.net.client-ip.trusted-proxy-hops")).isEqualTo("${CLIENT_IP_TRUSTED_HOPS:0}");

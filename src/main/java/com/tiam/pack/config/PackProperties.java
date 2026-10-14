@@ -20,6 +20,13 @@ public class PackProperties {
     /** Master switch for starting new checkouts. Paid orders keep working when it is off. */
     private boolean salesEnabled = false;
 
+    /**
+     * DEVELOPMENT ONLY. Lets a checkout start with the local file folder, the logging-only email sender and
+     * localhost URLs, which are otherwise refused (see PackSalesReadiness). Ignored when the {@code prod}
+     * profile is active. Never put it in a real deployment's environment.
+     */
+    private boolean devMode = false;
+
     private BigDecimal priceArs = new BigDecimal("14990");
     private BigDecimal gamesPriceArs = new BigDecimal("10000");
     private BigDecimal extraPriceArs = new BigDecimal("4990");

@@ -127,6 +127,10 @@ tiam:
     # Printable pack sales (Mercado Pago + download links). Off until the owner flips it on.
     # Starting a checkout is the only thing gated: paid orders keep downloading when it is off.
     sales-enabled: ${PACK_SALES_ENABLED:false}
+    # DEVELOPMENT ONLY. With sales on, the checkout refuses to start unless files come from R2, email really
+    # goes out (Resend) and the URLs are public https (see PackSalesReadiness). This lifts that so the whole
+    # flow can be tried on a laptop. Ignored under the prod profile. Do NOT set it in a real deployment.
+    dev-mode: ${PACK_DEV_MODE:false}
     # Prices are decided HERE, never by the browser.
     price-ars: ${PACK_PRICE_ARS:14990}
     games-price-ars: ${PACK_GAMES_PRICE_ARS:10000}

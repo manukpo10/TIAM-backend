@@ -32,6 +32,11 @@ public class R2PrivateFileStore implements PrivateFileStore {
     }
 
     @Override
+    public boolean isRemote() {
+        return true;
+    }
+
+    @Override
     public String signedDownloadUrl(String key, Duration ttl, String downloadFilename) {
         StorageKeys.requireSafe(key);
         String disposition = "attachment; filename=\"" + StorageKeys.safeFilename(downloadFilename) + "\"";

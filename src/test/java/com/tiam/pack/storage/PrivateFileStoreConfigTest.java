@@ -72,6 +72,17 @@ class PrivateFileStoreConfigTest {
                 .isInstanceOf(StorageUnavailableException.class);
     }
 
+    @Test
+    void onlyR2_countsAsARemoteStore_soSalesRefuseToStartOnAnythingElse() {
+        assertThat(config.privateFileStore(properties).isRemote()).as("local folder").isFalse();
+
+        properties.getStorage().setType("r2"); // incomplete credentials -> unavailable placeholder
+        assertThat(config.privateFileStore(properties).isRemote()).as("unavailable placeholder").isFalse();
+
+        fillR2();
+        assertThat(config.privateFileStore(properties).isRemote()).as("R2").isTrue();
+    }
+
     private void fillR2() {
         properties.getStorage().setR2AccountId("acct");
         properties.getStorage().setR2AccessKeyId("akid");

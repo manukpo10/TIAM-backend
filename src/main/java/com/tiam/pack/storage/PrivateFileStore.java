@@ -17,4 +17,12 @@ public interface PrivateFileStore {
      * @throws StorageUnavailableException if the store is misconfigured
      */
     String signedDownloadUrl(String key, Duration ttl, String downloadFilename);
+
+    /**
+     * True only for a real remote store a buyer's browser can reach (Cloudflare R2). The development folder and
+     * the "unavailable" placeholder are not: sales must refuse to start with them (see PackSalesReadiness).
+     */
+    default boolean isRemote() {
+        return false;
+    }
 }
