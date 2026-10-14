@@ -155,6 +155,71 @@ public class MercadoPagoService {
     }
 
     /**
+     * Creates a one-time-payment preference with several items, an expiry and a payer name. Used by the
+     * printable-pack checkout; {@link #createPreference} (the Desafío) is deliberately left as it was.
+     */
+    public CreatedPreference createCheckoutPreference(CheckoutPreferenceSpec spec)
+            throws MPException, MPApiException {
+        initSdk();
+
+        Preference preference = new PreferenceClient().create(buildCheckoutPreferenceRequest(spec));
+
+        log.info("Created MP checkout preference id={} for externalReference={}",
+                preference.getId(), spec.externalReference());
+
+        return new CreatedPreference(preference.getId(), preference.getInitPoint());
+    }
+
+    /** Pure request builder (no network, no SDK state), so the exact payload can be unit-tested. */
+    PreferenceRequest buildCheckoutPreferenceRequest(CheckoutPreferenceSpec spec) {
+        List<PreferenceItemRequest> items = spec.lines().stream()
+                .map(line -> PreferenceItemRequest.builder()
+                        .id(line.id())
+                        .title(line.title())
+                        .description(line.description())
+                        .categoryId("virtual_goods")
+                        .quantity(1)
+                        .unitPrice(line.unitPrice())
+                        .currencyId("ARS")
+                        .build())
+                .toList();
+
+        PreferenceBackUrlsRequest backUrls = PreferenceBackUrlsRequest.builder()
+                .success(spec.backUrl())
+                .failure(spec.backUrl())
+                .pending(spec.backUrl())
+                .build();
+
+        PreferenceRequest.PreferenceRequestBuilder builder = PreferenceRequest.builder()
+                .items(items)
+                .backUrls(backUrls)
+                .autoReturn("approved")
+                .externalReference(spec.externalReference())
+                .expires(true)
+                .expirationDateFrom(spec.expiresFrom())
+                .expirationDateTo(spec.expiresAt())
+                .statementDescriptor(spec.statementDescriptor());
+
+        PreferencePayerRequest.PreferencePayerRequestBuilder payer = PreferencePayerRequest.builder()
+                .email(spec.payerEmail());
+        if (StringUtils.hasText(spec.payerName())) {
+            String[] parts = spec.payerName().strip().split("\\s+", 2);
+            payer.name(parts[0]);
+            if (parts.length > 1) {
+                payer.surname(parts[1]);
+            }
+        }
+        builder.payer(payer.build());
+
+        // Same per-preference notification_url as the Desafío: the app-level webhook is unreliable in test mode.
+        if (StringUtils.hasText(plansProperties.getNotificationUrl())) {
+            builder.notificationUrl(plansProperties.getNotificationUrl());
+        }
+
+        return builder.build();
+    }
+
+    /**
      * Fetches a payment by its MP id.
      */
     public Payment getPayment(String paymentId) throws MPException, MPApiException {

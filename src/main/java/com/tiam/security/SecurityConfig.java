@@ -40,6 +40,8 @@ public class SecurityConfig {
                         .requestMatchers("/webhooks/**").permitAll()
                         .requestMatchers("/play/**").permitAll()
                         .requestMatchers("/challenge/**").permitAll()
+                        // Printable-pack buyers have no account: the order token in the URL is their credential.
+                        .requestMatchers("/packs/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/leads").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/info").permitAll()
                         .requestMatchers(

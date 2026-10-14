@@ -246,6 +246,22 @@ public class ChallengePurchaseService {
                 "Ya tenés los " + MONTHS_ON_SALE + " meses del Desafío activados — no queda ningún mes nuevo para comprar.");
     }
 
+    /**
+     * Whether this phone can still be granted another month on sale. The printable-pack checkout asks
+     * this before charging for the games add-on, so nobody pays for a month that cannot be delivered.
+     * Read-only and advisory: the real assignment happens at payment time ({@link #grantBundledMonth}).
+     */
+    @Transactional(readOnly = true)
+    public boolean hasMonthAvailable(String rawPhone) {
+        Set<Integer> paidMonths = paidMonthsFor(rawPhone);
+        for (int month = 1; month <= MONTHS_ON_SALE; month++) {
+            if (!paidMonths.contains(month)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private Set<Integer> paidMonthsFor(String rawPhone) {
         String normalized = PhoneNumberUtil.normalize(rawPhone);
         if (normalized.isEmpty()) {
