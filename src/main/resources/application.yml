@@ -1,5 +1,8 @@
 server:
   port: ${PORT:8080}
+  # Behind Render's proxy the TCP peer is the proxy; this makes request.getRemoteAddr() the real
+  # client (from X-Forwarded-For), which the pack rate limits rely on.
+  forward-headers-strategy: native
 
 spring:
   profiles:
@@ -109,3 +112,51 @@ tiam:
     # (see EmailConfig). The sender domain must be verified in Resend.
     resend-api-key: ${RESEND_API_KEY:}
     from: ${EMAIL_FROM:}
+  pack:
+    # Printable pack sales (Mercado Pago + download links). Off until the owner flips it on.
+    # Starting a checkout is the only thing gated: paid orders keep downloading when it is off.
+    sales-enabled: ${PACK_SALES_ENABLED:false}
+    # Prices are decided HERE, never by the browser.
+    price-ars: ${PACK_PRICE_ARS:14990}
+    games-price-ars: ${PACK_GAMES_PRICE_ARS:10000}
+    extra-price-ars: ${PACK_EXTRA_PRICE_ARS:4990}
+    landing-base-url: ${PACK_LANDING_BASE_URL:http://localhost:5173}
+    thankyou-url: ${PACK_THANKYOU_URL:http://localhost:5173/pack/gracias}
+    download-base-url: ${PACK_DOWNLOAD_BASE_URL:http://localhost:5173/pack/descargas}
+    access-days: ${PACK_ACCESS_DAYS:90}
+    catalog-version: ${PACK_CATALOG_VERSION:v1}
+    regret-notify-to: ${PACK_REGRET_NOTIFY_TO:}
+    owner-notify-to: ${PACK_OWNER_NOTIFY_TO:}
+    reconciliation:
+      # Safety net for lost webhooks — see PackOrderReconciliationService.
+      enabled: ${PACK_RECONCILIATION_ENABLED:true}
+      interval-ms: ${PACK_RECONCILIATION_INTERVAL_MS:900000} # 15 minutes
+      grace-period-minutes: 10
+      lookback-days: 14
+    email-retry:
+      # Re-sends the access email to paid orders that never got it — see PackEmailRetryService.
+      enabled: ${PACK_EMAIL_RETRY_ENABLED:true}
+      interval-ms: ${PACK_EMAIL_RETRY_INTERVAL_MS:900000} # 15 minutes
+      min-age-minutes: 5
+      lookback-hours: 72
+    downloads:
+      url-ttl-seconds: 300
+      daily-cap: 30
+      total-cap: 300
+    rate-limits:
+      checkout-per-ip: 5        # per 10 minutes
+      pending-per-email: 3      # PENDING orders per email per hour
+      token-calls-per-ip: 60    # per minute
+      resend-per-email: 3       # per day
+      resend-per-ip: 10         # per hour
+      regret-per-ip: 5          # per hour
+      regret-per-email: 2       # per day
+    storage:
+      # r2 | local. Empty = r2 when every R2_* value is set, otherwise local (development only).
+      type: ${PACK_STORAGE:}
+      local-dir: ${PACK_STORAGE_LOCAL_DIR:./pack-files}
+      local-base-url: ${PACK_LOCAL_BASE_URL:http://localhost:8080}
+      r2-account-id: ${R2_ACCOUNT_ID:}
+      r2-access-key-id: ${R2_ACCESS_KEY_ID:}
+      r2-secret-access-key: ${R2_SECRET_ACCESS_KEY:}
+      r2-bucket: ${R2_BUCKET:}

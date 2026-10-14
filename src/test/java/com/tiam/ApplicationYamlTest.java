@@ -45,4 +45,56 @@ class ApplicationYamlTest {
         assertThat(yaml.getProperty("tiam.email.resend-api-key")).isEqualTo("${RESEND_API_KEY:}");
         assertThat(yaml.getProperty("tiam.email.from")).isEqualTo("${EMAIL_FROM:}");
     }
+
+    @Test
+    void packSales_areOffUnlessTheOwnerTurnsThemOn() {
+        assertThat(yaml.getProperty("tiam.pack.sales-enabled")).isEqualTo("${PACK_SALES_ENABLED:false}");
+    }
+
+    @Test
+    void packPrices_defaultToTheLaunchPricesButComeFromTheEnvironment() {
+        assertThat(yaml.getProperty("tiam.pack.price-ars")).isEqualTo("${PACK_PRICE_ARS:14990}");
+        assertThat(yaml.getProperty("tiam.pack.games-price-ars")).isEqualTo("${PACK_GAMES_PRICE_ARS:10000}");
+        assertThat(yaml.getProperty("tiam.pack.extra-price-ars")).isEqualTo("${PACK_EXTRA_PRICE_ARS:4990}");
+    }
+
+    @Test
+    void packAccess_lastsNinetyDaysAndSignedUrlsFiveMinutes() {
+        assertThat(yaml.getProperty("tiam.pack.access-days")).isEqualTo("${PACK_ACCESS_DAYS:90}");
+        assertThat(yaml.getProperty("tiam.pack.downloads.url-ttl-seconds")).isEqualTo("300");
+        assertThat(yaml.getProperty("tiam.pack.downloads.daily-cap")).isEqualTo("30");
+        assertThat(yaml.getProperty("tiam.pack.downloads.total-cap")).isEqualTo("300");
+    }
+
+    @Test
+    void packUrls_andNotificationAddresses_comeFromTheEnvironment() {
+        assertThat(yaml.getProperty("tiam.pack.landing-base-url")).startsWith("${PACK_LANDING_BASE_URL:");
+        assertThat(yaml.getProperty("tiam.pack.thankyou-url")).startsWith("${PACK_THANKYOU_URL:");
+        assertThat(yaml.getProperty("tiam.pack.download-base-url")).startsWith("${PACK_DOWNLOAD_BASE_URL:");
+        assertThat(yaml.getProperty("tiam.pack.regret-notify-to")).isEqualTo("${PACK_REGRET_NOTIFY_TO:}");
+        assertThat(yaml.getProperty("tiam.pack.owner-notify-to")).isEqualTo("${PACK_OWNER_NOTIFY_TO:}");
+    }
+
+    @Test
+    void packStorageCredentials_comeOnlyFromEnvironmentVariablesWithNoDefault() {
+        assertThat(yaml.getProperty("tiam.pack.storage.r2-account-id")).isEqualTo("${R2_ACCOUNT_ID:}");
+        assertThat(yaml.getProperty("tiam.pack.storage.r2-access-key-id")).isEqualTo("${R2_ACCESS_KEY_ID:}");
+        assertThat(yaml.getProperty("tiam.pack.storage.r2-secret-access-key")).isEqualTo("${R2_SECRET_ACCESS_KEY:}");
+        assertThat(yaml.getProperty("tiam.pack.storage.r2-bucket")).isEqualTo("${R2_BUCKET:}");
+    }
+
+    @Test
+    void packReconciliationAndEmailRetry_runEveryFifteenMinutes() {
+        assertThat(yaml.getProperty("tiam.pack.reconciliation.interval-ms"))
+                .isEqualTo("${PACK_RECONCILIATION_INTERVAL_MS:900000}");
+        assertThat(yaml.getProperty("tiam.pack.reconciliation.lookback-days")).isEqualTo("14");
+        assertThat(yaml.getProperty("tiam.pack.email-retry.interval-ms"))
+                .isEqualTo("${PACK_EMAIL_RETRY_INTERVAL_MS:900000}");
+        assertThat(yaml.getProperty("tiam.pack.email-retry.lookback-hours")).isEqualTo("72");
+    }
+
+    @Test
+    void forwardedHeaders_areTrustedSoRateLimitsSeeTheRealClientIpBehindRender() {
+        assertThat(yaml.getProperty("server.forward-headers-strategy")).isEqualTo("native");
+    }
 }

@@ -44,3 +44,33 @@ services:
         sync: false
       - key: EMAIL_FROM
         sync: false
+      - key: PACK_SALES_ENABLED
+        sync: false
+      - key: PACK_PRICE_ARS
+        sync: false
+      - key: PACK_GAMES_PRICE_ARS
+        sync: false
+      - key: PACK_EXTRA_PRICE_ARS
+        sync: false
+      - key: PACK_LANDING_BASE_URL
+        sync: false
+      - key: PACK_THANKYOU_URL
+        sync: false
+      - key: PACK_DOWNLOAD_BASE_URL
+        sync: false
+      - key: PACK_ACCESS_DAYS
+        sync: false
+      - key: PACK_REGRET_NOTIFY_TO
+        sync: false
+      - key: PACK_OWNER_NOTIFY_TO
+        sync: false
+      - key: PACK_STORAGE
+        sync: false
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET
+        sync: false
