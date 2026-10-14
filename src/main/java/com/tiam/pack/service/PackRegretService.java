@@ -89,9 +89,9 @@ public class PackRegretService {
 
     private void enforceLimits(String email, String clientIp) {
         PackProperties.RateLimits limits = properties.getRateLimits();
-        boolean ipAllowed = rateLimiter.tryAcquire("regret-ip:" + clientIp, limits.getRegretPerIp(), Duration.ofHours(1));
-        boolean emailAllowed = rateLimiter.tryAcquire("regret-email:" + email, limits.getRegretPerEmail(), Duration.ofDays(1));
-        if (!ipAllowed || !emailAllowed) {
+        // IP first and bail out: a blocked visitor must not also create per-email entries in the limiter.
+        if (!rateLimiter.tryAcquireByIp("regret-ip", clientIp, limits.getRegretPerIp(), Duration.ofHours(1))
+                || !rateLimiter.tryAcquire("regret-email:" + email, limits.getRegretPerEmail(), Duration.ofDays(1))) {
             log.warn("Regret form over quota (ip={} email={})", clientIp, EmailAddresses.mask(email));
             throw new PackRateLimitedException();
         }

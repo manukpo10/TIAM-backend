@@ -152,6 +152,7 @@ public class PackCheckoutService {
             order.setInitPoint(preference.initPoint());
             orders.save(order);
             rememberOwner(order, command.clientIp());
+            spendEmailQuota(order.getEmail(), command.clientIp());
             log.info("Pack checkout started: order id={} edition={} total={} buyer={}",
                     order.getId(), edition, price.total(), EmailAddresses.mask(email));
             return preference.initPoint();
@@ -204,18 +205,38 @@ public class PackCheckoutService {
         checkoutOwners.put(order.getId(), clientIp);
     }
 
+    /**
+     * Visitor first (coarse: it protects Mercado Pago and the database, and an unknown IP is not limited), then
+     * the (email, visitor) pair, which is the strict one. Keyed on the pair, a stranger who knows a buyer's email
+     * can only exhaust THEIR OWN quota for it, never lock the real buyer out (they come from another address).
+     * The pair's quota is spent only when a checkout was actually created ({@link #spendEmailQuota}), so a
+     * Mercado Pago outage does not eat it.
+     */
     private void enforceLimits(String email, String clientIp) {
-        String ip = StringUtils.hasText(clientIp) ? clientIp : "unknown";
-        if (!rateLimiter.tryAcquire("checkout-ip:" + ip, properties.getRateLimits().getCheckoutPerIp(), IP_WINDOW)) {
-            log.warn("Pack checkout refused: too many checkouts from ip={}", ip);
+        PackProperties.RateLimits limits = properties.getRateLimits();
+        if (!rateLimiter.tryAcquireByIp("checkout-ip", clientIp, limits.getCheckoutPerIp(), IP_WINDOW)) {
+            log.warn("Pack checkout refused: too many checkouts from ip={}", clientIp);
+            throw new PackCheckoutException(PackCheckoutError.LIMITE);
+        }
+        if (!rateLimiter.isWithinLimit(emailQuotaKey(email, clientIp), limits.getPendingPerEmailAndIp(), PENDING_WINDOW)) {
+            log.warn("Pack checkout refused: too many checkouts for {} from this visitor", EmailAddresses.mask(email));
             throw new PackCheckoutException(PackCheckoutError.LIMITE);
         }
         long pending = orders.countByEmailAndStatusAndCreatedAtAfter(
                 email, PackOrderStatus.PENDING, Instant.now().minus(PENDING_WINDOW));
-        if (pending >= properties.getRateLimits().getPendingPerEmail()) {
+        if (pending >= limits.getPendingPerEmail()) {
             log.warn("Pack checkout refused: too many pending orders for {}", EmailAddresses.mask(email));
             throw new PackCheckoutException(PackCheckoutError.LIMITE);
         }
+    }
+
+    private void spendEmailQuota(String email, String clientIp) {
+        rateLimiter.tryAcquire(emailQuotaKey(email, clientIp),
+                properties.getRateLimits().getPendingPerEmailAndIp(), PENDING_WINDOW);
+    }
+
+    private static String emailQuotaKey(String email, String clientIp) {
+        return "checkout-email-ip:" + email + "|" + (StringUtils.hasText(clientIp) ? clientIp : "-");
     }
 
     // --- input normalisation -------------------------------------------------------------------

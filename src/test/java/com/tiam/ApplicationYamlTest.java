@@ -99,4 +99,18 @@ class ApplicationYamlTest {
     void forwardedHeaders_areTrustedSoRateLimitsSeeTheRealClientIpBehindRender() {
         assertThat(yaml.getProperty("server.forward-headers-strategy")).isEqualTo("native");
     }
+
+    @Test
+    void clientIp_isConfigurableFromTheEnvironment_andSafeByDefault() {
+        assertThat(yaml.getProperty("tiam.net.client-ip.header")).isEqualTo("${CLIENT_IP_HEADER:}");
+        assertThat(yaml.getProperty("tiam.net.client-ip.trusted-proxy-hops")).isEqualTo("${CLIENT_IP_TRUSTED_HOPS:0}");
+        assertThat(yaml.getProperty("tiam.net.client-ip.diagnostics")).isEqualTo("${CLIENT_IP_DIAGNOSTICS:false}");
+    }
+
+    @Test
+    void rateLimits_areCoarsePerIp_becauseCarriersShareAddresses() {
+        assertThat(Integer.parseInt(yaml.getProperty("tiam.pack.rate-limits.checkout-per-ip"))).isGreaterThanOrEqualTo(10);
+        assertThat(Integer.parseInt(yaml.getProperty("tiam.pack.rate-limits.token-calls-per-ip-total"))).isGreaterThanOrEqualTo(300);
+        assertThat(yaml.getProperty("tiam.pack.rate-limits.pending-per-email-and-ip")).isEqualTo("3");
+    }
 }

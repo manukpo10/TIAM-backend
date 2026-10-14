@@ -1,6 +1,7 @@
 package com.tiam.pack.web;
 
 import com.tiam.common.web.ApiResponse;
+import com.tiam.common.web.ClientIpResolver;
 import com.tiam.pack.dto.ResendAccessRequest;
 import com.tiam.pack.service.PackAccessResendService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -25,10 +26,11 @@ public class PackAccessController {
     static final String MESSAGE = "Si hay un pedido con ese email, te mandamos el acceso.";
 
     private final PackAccessResendService resendService;
+    private final ClientIpResolver clientIp;
 
     @PostMapping("/resend")
     public ResponseEntity<ApiResponse<Void>> resend(@Valid @RequestBody ResendAccessRequest request, HttpServletRequest http) {
-        resendService.request(request.email(), http.getRemoteAddr());
+        resendService.request(request.email(), clientIp.resolve(http));
         return ResponseEntity.accepted()
                 .cacheControl(CacheControl.noStore())
                 .body(ApiResponse.ok(null, MESSAGE));

@@ -373,6 +373,51 @@ class PackCheckoutServiceTest {
     }
 
     @Test
+    void start_anUnknownIp_isNeverLimitedByIp_soGenuineBuyersAreNotBlockedByOurOwnBlindness() throws Exception {
+        properties.getRateLimits().setCheckoutPerIp(1);
+        givenMercadoPagoWorks();
+
+        for (int i = 0; i < 5; i++) {
+            assertThat(service.start(command().clientIp(null).email("u" + i + "@example.com").build())).isEqualTo(INIT_POINT);
+        }
+    }
+
+    @Test
+    void start_aStrangerWhoKnowsAnEmail_canOnlyExhaustTheirOwnQuota_notTheBuyers() throws Exception {
+        properties.getRateLimits().setPendingPerEmailAndIp(2);
+        givenMercadoPagoWorks();
+        service.start(command().clientIp("6.6.6.6").name("Intruso A").build());
+        service.start(command().clientIp("6.6.6.6").edition("profesionales").name("Intruso B").build());
+
+        assertThatThrownBy(() -> service.start(command().clientIp("6.6.6.6").name("Intruso C").extras(List.of("cuadernillo")).build()))
+                .isInstanceOfSatisfying(PackCheckoutException.class, e -> assertThat(e.error()).isEqualTo(PackCheckoutError.LIMITE));
+
+        // the real buyer, from another address, still gets through
+        assertThat(service.start(command().clientIp("7.7.7.7").name("Ana").extras(List.of("cuadernillo")).build()))
+                .isEqualTo(INIT_POINT);
+    }
+
+    @Test
+    void start_aMercadoPagoOutage_doesNotSpendTheBuyersQuota() throws Exception {
+        properties.getRateLimits().setPendingPerEmailAndIp(1);
+        when(mercadoPago.isConfigured()).thenReturn(true);
+        when(orders.save(any(PackOrder.class))).thenAnswer(inv -> {
+            PackOrder o = inv.getArgument(0);
+            if (o.getId() == null) {
+                o.setId(42L);
+            }
+            return o;
+        });
+        when(mercadoPago.createCheckoutPreference(any())).thenThrow(new IllegalStateException("MP down"));
+        assertThatThrownBy(() -> service.start(command().build())).isInstanceOf(PackCheckoutException.class);
+
+        org.mockito.Mockito.doReturn(new CreatedPreference("PREF-1", INIT_POINT))
+                .when(mercadoPago).createCheckoutPreference(any());
+
+        assertThat(service.start(command().build())).isEqualTo(INIT_POINT);
+    }
+
+    @Test
     void start_tooManyPendingOrdersForOneEmail_areLimited() {
         properties.getRateLimits().setPendingPerEmail(3);
         when(orders.countByEmailAndStatusAndCreatedAtAfter(eq("ana@example.com"), eq(PackOrderStatus.PENDING), any(Instant.class)))

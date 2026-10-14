@@ -43,7 +43,7 @@ class PackAccessAndRegretControllerTest {
 
     @BeforeEach
     void setUp() {
-        mvc = MockMvcBuilders.standaloneSetup(new PackAccessController(resendService), new PackRegretController(regretService))
+        mvc = MockMvcBuilders.standaloneSetup(new PackAccessController(resendService, TestIps.RESOLVER), new PackRegretController(regretService, TestIps.RESOLVER))
                 .setControllerAdvice(new PackExceptionHandler(), new GlobalExceptionHandler())
                 // same date format as application.yml (spring.jackson.serialization.write-dates-as-timestamps=false)
                 .setMessageConverters(new MappingJackson2HttpMessageConverter(

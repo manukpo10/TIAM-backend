@@ -64,7 +64,8 @@ class PackAccessResendServiceTest {
     }
 
     @Test
-    void request_tenPerIpPerHour_thenSilentlyDropped() {
+    void request_perIpPerHour_thenSilentlyDropped() {
+        properties.getRateLimits().setResendPerIp(10);
         for (int i = 0; i < 15; i++) {
             service.request("buyer" + i + "@example.com", "1.2.3.4");
         }

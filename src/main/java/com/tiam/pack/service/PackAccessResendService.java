@@ -35,10 +35,15 @@ public class PackAccessResendService {
             return;
         }
         PackProperties.RateLimits limits = properties.getRateLimits();
-        boolean ipAllowed = rateLimiter.tryAcquire("resend-ip:" + clientIp, limits.getResendPerIp(), Duration.ofHours(1));
+        // The visitor's quota first: a blocked visitor must not also create per-email entries (that was how a
+        // script with unique emails grew the limiter without bound). An unknown IP is not limited.
+        if (!rateLimiter.tryAcquireByIp("resend-ip", clientIp, limits.getResendPerIp(), Duration.ofHours(1))) {
+            log.warn("Pack access re-send over the IP quota (ip={}); dropped silently", clientIp);
+            return;
+        }
         boolean emailAllowed = rateLimiter.tryAcquire("resend-email:" + email, limits.getResendPerEmail(), Duration.ofDays(1));
-        if (!ipAllowed || !emailAllowed) {
-            log.warn("Pack access re-send over quota (ip={} email={}); dropped silently", clientIp, EmailAddresses.mask(email));
+        if (!emailAllowed) {
+            log.warn("Pack access re-send over the email quota ({}); dropped silently", EmailAddresses.mask(email));
             return;
         }
         resender.resendAsync(email);

@@ -1,7 +1,10 @@
 server:
   port: ${PORT:8080}
-  # Behind Render's proxy the TCP peer is the proxy; this makes request.getRemoteAddr() the real
-  # client (from X-Forwarded-For), which the pack rate limits rely on.
+  # Behind Render's proxy the TCP peer is the proxy. "native" lets Tomcat's remote-ip valve skip the
+  # private-network proxies and take the first PUBLIC address in X-Forwarded-For as the peer. If a public
+  # proxy (Cloudflare) sits in front too, the peer is that proxy's edge: set CLIENT_IP_TRUSTED_HOPS=1 (or
+  # CLIENT_IP_HEADER=CF-Connecting-IP) below. See com.tiam.common.web.ClientIpResolver. Verify it live with
+  # CLIENT_IP_DIAGNOSTICS=true once; the pack rate limits and the "same visit" check depend on it.
   forward-headers-strategy: native
 
 spring:
@@ -68,6 +71,14 @@ tiam:
     expiration-ms: ${JWT_EXPIRATION_MS:86400000}
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+  net:
+    client-ip:
+      # Single-valued header set by a proxy you trust (e.g. CF-Connecting-IP). Empty = use X-Forwarded-For.
+      header: ${CLIENT_IP_HEADER:}
+      # Public proxies in front of the app beyond the private ones Tomcat skips (Cloudflare = 1).
+      trusted-proxy-hops: ${CLIENT_IP_TRUSTED_HOPS:0}
+      # Logs peer / X-Forwarded-For / resolved address for every pack request. Turn on for the live test only.
+      diagnostics: ${CLIENT_IP_DIAGNOSTICS:false}
   mercadopago:
     access-token: ${MP_ACCESS_TOKEN:}
     webhook-secret: ${MP_WEBHOOK_SECRET:}
@@ -146,13 +157,18 @@ tiam:
       daily-cap: 30
       total-cap: 300
     rate-limits:
-      checkout-per-ip: 5        # per 10 minutes
-      pending-per-email: 3      # PENDING orders per email per hour
-      token-calls-per-ip: 60    # per minute
-      resend-per-email: 3       # per day
-      resend-per-ip: 10         # per hour
-      regret-per-ip: 5          # per hour
-      regret-per-email: 2       # per day
+      # Coarse on purpose: mobile carriers (CGNAT) put many buyers behind one public address, and an
+      # address we cannot read is never limited. The strict limits are per (email, visitor).
+      checkout-per-ip: 20             # per 10 minutes
+      pending-per-email-and-ip: 3     # checkouts per (email, visitor) per hour
+      pending-per-email: 20           # PENDING orders per email per hour, whoever started them (loose ceiling)
+      token-calls-per-ip: 60          # per (visitor, token) per minute
+      token-calls-per-ip-total: 600   # per visitor per minute, across tokens
+      resend-per-email: 3             # per day, counted only for emails that really have a paid order
+      resend-per-ip: 30               # per hour
+      regret-per-ip: 10               # per hour
+      regret-per-email: 2             # per day
+      regret-receipts-per-day: 100    # receipts emailed to buyers by the regret form, in total
     storage:
       # r2 | local. Empty = r2 when every R2_* value is set, otherwise local (development only).
       type: ${PACK_STORAGE:}

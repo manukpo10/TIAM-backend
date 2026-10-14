@@ -1,6 +1,8 @@
 package com.tiam.pack.web;
 
 import com.tiam.common.web.ApiResponse;
+import com.tiam.common.web.ClientIpResolver;
+import com.tiam.pack.domain.PackTokens;
 import com.tiam.pack.config.PackProperties;
 import com.tiam.pack.domain.PackOrderStatus;
 import com.tiam.pack.dto.ConfirmPaymentRequest;
@@ -38,6 +40,7 @@ public class PackOrderController {
     private final PackDownloadService downloadService;
     private final PackRateLimiter rateLimiter;
     private final PackProperties properties;
+    private final ClientIpResolver clientIp;
 
     /**
      * The downloads / thank-you page. PAID with a valid access window returns the full body; PENDING and
@@ -45,7 +48,7 @@ public class PackOrderController {
      */
     @GetMapping("/{token}")
     public ResponseEntity<ApiResponse<PackOrderResponse>> get(@PathVariable String token, HttpServletRequest http) {
-        limit(http);
+        limit(http, token);
         return tokenResponse(downloadService.view(token));
     }
 
@@ -56,7 +59,7 @@ public class PackOrderController {
     @PostMapping("/{token}/files/{fileKey}/link")
     public ResponseEntity<ApiResponse<DownloadLinkResponse>> issueLink(
             @PathVariable String token, @PathVariable String fileKey, HttpServletRequest http) {
-        limit(http);
+        limit(http, token);
         return tokenResponse(downloadService.issueLink(token, fileKey));
     }
 
@@ -69,7 +72,7 @@ public class PackOrderController {
             @PathVariable String token,
             @Valid @RequestBody ConfirmPaymentRequest request,
             HttpServletRequest http) {
-        limit(http);
+        limit(http, token);
         PackOrderStatus status = confirmationService.confirm(token, request.paymentId());
         return tokenResponse(new OrderStatusResponse(publicStatus(status)));
     }
@@ -84,12 +87,25 @@ public class PackOrderController {
         };
     }
 
-    private void limit(HttpServletRequest http) {
-        boolean allowed = rateLimiter.tryAcquire("token-ip:" + http.getRemoteAddr(),
-                properties.getRateLimits().getTokenCallsPerIp(), Duration.ofMinutes(1));
+    /**
+     * Two buckets: one per (visitor, token) for the page that polls, and a looser one per visitor across all
+     * tokens. Keying only on the IP made a shared address (mobile carriers put a whole ad campaign behind one) run
+     * out of calls after a handful of simultaneous thank-you pages. An unknown IP skips the per-visitor bucket.
+     */
+    private void limit(HttpServletRequest http, String token) {
+        String ip = clientIp.resolve(http);
+        PackProperties.RateLimits limits = properties.getRateLimits();
+        boolean allowed = rateLimiter.tryAcquireByIp("token-ip", ip, limits.getTokenCallsPerIpTotal(), Duration.ofMinutes(1))
+                && rateLimiter.tryAcquire("token-call:" + (ip == null ? "-" : ip) + ":" + fingerprint(token),
+                        limits.getTokenCallsPerIp(), Duration.ofMinutes(1));
         if (!allowed) {
             throw new PackRateLimitedException();
         }
+    }
+
+    /** A short stand-in for the token in the limiter's keys, so the credential itself is never held there. */
+    private static String fingerprint(String token) {
+        return PackTokens.looksValid(token) ? Integer.toHexString(token.hashCode()) : "invalid";
     }
 
     private static <T> ResponseEntity<ApiResponse<T>> tokenResponse(T data) {

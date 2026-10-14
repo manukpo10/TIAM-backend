@@ -1,5 +1,6 @@
 package com.tiam.pack.web;
 
+import com.tiam.common.web.ClientIpResolver;
 import com.tiam.pack.service.CheckoutCommand;
 import com.tiam.pack.service.PackCheckoutError;
 import com.tiam.pack.service.PackCheckoutException;
@@ -38,6 +39,7 @@ public class PackCheckoutController {
     private final PackCheckoutService checkoutService;
     private final PackOriginPolicy originPolicy;
     private final PackRedirects redirects;
+    private final ClientIpResolver clientIp;
 
     @PostMapping(value = "/checkout", consumes = MediaType.APPLICATION_FORM_URLENCODED_VALUE)
     public ResponseEntity<Void> checkout(@RequestParam MultiValueMap<String, String> form, HttpServletRequest request) {
@@ -64,7 +66,7 @@ public class PackCheckoutController {
                 form.getFirst("utm_medium"),
                 form.getFirst("utm_campaign"),
                 form.getFirst("utm_content"),
-                request.getRemoteAddr());
+                clientIp.resolve(request));
 
         String paymentUrl = checkoutService.start(command);
         if (!PackRedirects.isMercadoPagoUrl(paymentUrl)) {

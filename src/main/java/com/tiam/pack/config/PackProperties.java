@@ -109,20 +109,32 @@ public class PackProperties {
     @Getter
     @Setter
     public static class RateLimits {
-        /** New checkouts per client IP per 10 minutes. */
-        private int checkoutPerIp = 5;
-        /** PENDING orders per email per hour. */
-        private int pendingPerEmail = 3;
-        /** Calls to the token-bearing endpoints per client IP per minute. */
+        /**
+         * New checkouts per client IP per 10 minutes. Deliberately generous: mobile carriers (CGNAT) put many
+         * buyers of one ad campaign behind one public address, and an unknown IP is never limited.
+         */
+        private int checkoutPerIp = 20;
+        /** New checkouts per (email, client IP) per hour: stops one visitor from piling up orders for an address. */
+        private int pendingPerEmailAndIp = 3;
+        /**
+         * PENDING orders per email per hour, whoever started them. A loose ceiling only: it must stay high enough
+         * that a stranger who knows an email cannot lock its owner out of buying (the strict limit is per IP).
+         */
+        private int pendingPerEmail = 20;
+        /** Calls to the token-bearing endpoints per (client IP, token) per minute: one thank-you page polls ~15/min. */
         private int tokenCallsPerIp = 60;
-        /** Access re-send requests per email per day. */
+        /** Calls to the token-bearing endpoints per client IP per minute, across every token. */
+        private int tokenCallsPerIpTotal = 600;
+        /** Access re-send requests per email per day (counted only when the email really has a paid order). */
         private int resendPerEmail = 3;
         /** Access re-send requests per client IP per hour. */
-        private int resendPerIp = 10;
+        private int resendPerIp = 30;
         /** Regret submissions per client IP per hour. */
-        private int regretPerIp = 5;
+        private int regretPerIp = 10;
         /** Regret submissions per email per day. */
         private int regretPerEmail = 2;
+        /** Receipts the regret form may email to buyers in total per day, so it can never become a mail cannon. */
+        private int regretReceiptsPerDay = 100;
     }
 
     @Getter

@@ -47,7 +47,7 @@ class PackOrderControllerTest {
     @BeforeEach
     void setUp() {
         properties = new PackProperties();
-        PackOrderController controller = new PackOrderController(confirmationService, downloadService, new PackRateLimiter(), properties);
+        PackOrderController controller = new PackOrderController(confirmationService, downloadService, new PackRateLimiter(), properties, TestIps.RESOLVER);
         mvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new PackExceptionHandler(), new GlobalExceptionHandler())
                 .build();

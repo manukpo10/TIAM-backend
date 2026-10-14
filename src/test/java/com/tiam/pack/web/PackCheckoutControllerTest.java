@@ -41,7 +41,7 @@ class PackCheckoutControllerTest {
         properties.setLandingBaseUrl(LANDING);
         PackCheckoutController controller = new PackCheckoutController(
                 checkoutService, new PackOriginPolicy("https://tiamdigital.com,https://www.tiamdigital.com"),
-                new PackRedirects(properties));
+                new PackRedirects(properties), TestIps.RESOLVER);
         mvc = MockMvcBuilders.standaloneSetup(controller).build();
     }
 

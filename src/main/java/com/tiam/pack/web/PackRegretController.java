@@ -1,6 +1,7 @@
 package com.tiam.pack.web;
 
 import com.tiam.common.web.ApiResponse;
+import com.tiam.common.web.ClientIpResolver;
 import com.tiam.pack.dto.RegretReceiptResponse;
 import com.tiam.pack.dto.RegretRequest;
 import com.tiam.pack.service.PackRegretService;
@@ -22,11 +23,12 @@ import org.springframework.web.bind.annotation.RestController;
 public class PackRegretController {
 
     private final PackRegretService regretService;
+    private final ClientIpResolver clientIp;
 
     @PostMapping
     public ResponseEntity<ApiResponse<RegretReceiptResponse>> submit(
             @Valid @RequestBody RegretRequest request, HttpServletRequest http) {
-        RegretReceiptResponse receipt = regretService.submit(request, http.getRemoteAddr());
+        RegretReceiptResponse receipt = regretService.submit(request, clientIp.resolve(http));
         return ResponseEntity.status(HttpStatus.CREATED)
                 .cacheControl(CacheControl.noStore())
                 .body(ApiResponse.ok(receipt));
