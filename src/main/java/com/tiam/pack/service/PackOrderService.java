@@ -130,7 +130,12 @@ public class PackOrderService {
             return;
         }
         if (order.getStatus() == PackOrderStatus.REVOKED) {
-            log.info("Pack order id={} is REVOKED - ignoring approved payment {}", order.getId(), payment.paymentId());
+            // Never resurrected, but never silent either: money may have moved that nobody knows about.
+            log.warn("Pack order id={} is REVOKED - ignoring approved payment {}", order.getId(), payment.paymentId());
+            ownerNotifier.notify("Pago aprobado en un pedido revocado (pedido " + order.getId() + ")",
+                    "Mercado Pago aprobó el pago " + payment.paymentId() + " para el pedido " + order.getId()
+                            + ", que estaba revocado por un reembolso o un contracargo. No se entregó nada. "
+                            + "Si el comprador volvió a pagar a propósito, hay que armar un pedido nuevo o reembolsar.");
             return;
         }
 

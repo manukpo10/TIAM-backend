@@ -125,6 +125,7 @@ class PackOrderServiceTest {
         assertThat(order.getStatus()).isEqualTo(PackOrderStatus.REVOKED);
         verify(orders, never()).save(any());
         verifyNoInteractions(events);
+        verify(ownerNotifier).notify(org.mockito.ArgumentMatchers.contains("42"), org.mockito.ArgumentMatchers.contains("PAY-9"));
     }
 
     @Test
