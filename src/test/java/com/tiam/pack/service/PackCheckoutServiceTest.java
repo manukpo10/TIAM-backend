@@ -202,29 +202,60 @@ class PackCheckoutServiceTest {
     // --- double click --------------------------------------------------------------------
 
     @Test
-    void start_aRecentPendingOrderForTheSameThingReusesItsCheckout_withoutCreatingAnotherOne() throws Exception {
-        PackOrder existing = new PackOrder();
-        existing.setId(7L);
-        existing.setInitPoint("https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=PREV");
+    void start_aDoubleClickFromTheSameVisitorReusesTheirCheckout_withoutCreatingAnotherOne() throws Exception {
+        givenMercadoPagoWorks();
+        service.start(command().build()); // first click creates order 42 for this visitor's IP
+        PackOrder created = lastSavedOrder();
         when(orders.findReusable(eq("ana@example.com"), eq(PackEdition.FAMILIAS), eq(false), eq(false),
-                eq(PackOrderStatus.PENDING), any(Instant.class))).thenReturn(List.of(existing));
+                eq(PackOrderStatus.PENDING), any(Instant.class))).thenReturn(List.of(created));
+
+        String redirect = service.start(command().build()); // second click, same visitor
+
+        assertThat(redirect).isEqualTo(INIT_POINT);
+        verify(mercadoPago, times(1)).createCheckoutPreference(any()); // no second preference
+    }
+
+    @Test
+    void start_aCheckoutStartedByAnotherVisitorForTheSameEmail_isNeverReused() throws Exception {
+        // Someone who knows a buyer's email must not be able to pre-create the checkout that buyer will land on
+        // (it would carry the attacker's name, phone and order token).
+        givenMercadoPagoWorks();
+        service.start(command().clientIp("6.6.6.6").build()); // attacker
+        PackOrder attackers = lastSavedOrder();
+        when(orders.findReusable(any(), any(), anyBoolean(), anyBoolean(), any(), any())).thenReturn(List.of(attackers));
+        when(mercadoPago.createCheckoutPreference(any())).thenReturn(new CreatedPreference("PREF-VICTIM",
+                "https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=PREF-VICTIM"));
+
+        String redirect = service.start(command().clientIp("7.7.7.7").build()); // the real buyer
+
+        assertThat(redirect).contains("PREF-VICTIM");
+        verify(mercadoPago, times(2)).createCheckoutPreference(any());
+    }
+
+    @Test
+    void start_aCheckoutThisProcessDoesNotRememberStarting_isNeverReused() throws Exception {
+        // e.g. created before a restart: the safe direction is a fresh order, not a possible stranger's one
+        PackOrder stranger = new PackOrder();
+        stranger.setId(7L);
+        stranger.setInitPoint("https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=PREV");
+        when(orders.findReusable(any(), any(), anyBoolean(), anyBoolean(), any(), any())).thenReturn(List.of(stranger));
+        givenMercadoPagoWorks();
 
         String redirect = service.start(command().build());
 
-        assertThat(redirect).isEqualTo("https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=PREV");
-        verify(orders, never()).save(any());
-        verifyNoInteractions(mercadoPago);
+        assertThat(redirect).isEqualTo(INIT_POINT);
     }
 
     @Test
     void start_reusingACheckoutDoesNotConsumeTheIpQuota() throws Exception {
         properties.getRateLimits().setCheckoutPerIp(1);
-        PackOrder existing = new PackOrder();
-        existing.setInitPoint("https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=PREV");
-        when(orders.findReusable(any(), any(), anyBoolean(), anyBoolean(), any(), any())).thenReturn(List.of(existing));
+        givenMercadoPagoWorks();
+        service.start(command().build()); // uses the single allowed checkout
+        PackOrder created = lastSavedOrder();
+        when(orders.findReusable(any(), any(), anyBoolean(), anyBoolean(), any(), any())).thenReturn(List.of(created));
 
         for (int i = 0; i < 5; i++) {
-            assertThat(service.start(command().build())).contains("PREV");
+            assertThat(service.start(command().build())).isEqualTo(INIT_POINT);
         }
     }
 

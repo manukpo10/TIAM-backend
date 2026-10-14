@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -52,6 +53,7 @@ public class PackCheckoutService {
     private static final Duration PENDING_WINDOW = Duration.ofHours(1);
     private static final ZoneId ARGENTINA = ZoneId.of("America/Argentina/Buenos_Aires");
     private static final int LOCK_STRIPES = 64;
+    private static final int MAX_REMEMBERED_CHECKOUTS = 5_000;
 
     private static final Pattern EMAIL = Pattern.compile("[a-z0-9._%+'-]{1,64}@[a-z0-9-]+(\\.[a-z0-9-]+)*\\.[a-z]{2,}");
     private static final Pattern EXPECTED_TOTAL = Pattern.compile("\\d{1,9}([.,]\\d{1,2})?");
@@ -69,6 +71,14 @@ public class PackCheckoutService {
      * so the set of locks never grows. Single-instance assumption, like the rest of the backend.
      */
     private final Object[] emailLocks = newLocks();
+
+    /**
+     * Which client IP started each recent checkout. A double click is only forgiven for the SAME visitor: without
+     * this, anyone who knows a buyer's email could pre-create a checkout for it (with their own name, phone and
+     * order token) and have the real buyer redirected into it. In memory on purpose: after a restart nothing is
+     * reused, which is the safe direction, and it costs no personal data in the database.
+     */
+    private final ConcurrentHashMap<Long, String> checkoutOwners = new ConcurrentHashMap<>();
 
     /** @return the Mercado Pago URL to send the buyer to */
     public String start(CheckoutCommand command) {
@@ -91,7 +101,9 @@ public class PackCheckoutService {
 
         synchronized (emailLocks[Math.floorMod(email.hashCode(), LOCK_STRIPES)]) {
             Optional<PackOrder> reusable = orders.findReusable(email, edition, extras.games(), extras.extra(),
-                    PackOrderStatus.PENDING, Instant.now().minus(REUSE_WINDOW)).stream().findFirst();
+                    PackOrderStatus.PENDING, Instant.now().minus(REUSE_WINDOW)).stream()
+                    .filter(candidate -> startedBy(candidate, command.clientIp()))
+                    .findFirst();
             if (reusable.isPresent()) {
                 log.info("Pack checkout: reusing the open checkout of order id={}", reusable.get().getId());
                 return reusable.get().getInitPoint();
@@ -139,6 +151,7 @@ public class PackCheckoutService {
             order.setMpPreferenceId(preference.id());
             order.setInitPoint(preference.initPoint());
             orders.save(order);
+            rememberOwner(order, command.clientIp());
             log.info("Pack checkout started: order id={} edition={} total={} buyer={}",
                     order.getId(), edition, price.total(), EmailAddresses.mask(email));
             return preference.initPoint();
@@ -175,6 +188,20 @@ public class PackCheckoutService {
     private String returnUrl(PackOrder order) {
         String base = properties.getThankyouUrl();
         return base + (base.contains("?") ? "&" : "?") + "o=" + order.getAccessToken();
+    }
+
+    private boolean startedBy(PackOrder candidate, String clientIp) {
+        return StringUtils.hasText(clientIp) && clientIp.equals(checkoutOwners.get(candidate.getId()));
+    }
+
+    private void rememberOwner(PackOrder order, String clientIp) {
+        if (!StringUtils.hasText(clientIp)) {
+            return;
+        }
+        if (checkoutOwners.size() >= MAX_REMEMBERED_CHECKOUTS) {
+            checkoutOwners.clear(); // nothing is reused until new checkouts repopulate it: safe, just less convenient
+        }
+        checkoutOwners.put(order.getId(), clientIp);
     }
 
     private void enforceLimits(String email, String clientIp) {
