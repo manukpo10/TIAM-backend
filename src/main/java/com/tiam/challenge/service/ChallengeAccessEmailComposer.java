@@ -34,8 +34,10 @@ import org.springframework.web.util.HtmlUtils;
  * areas, and a mobile query that makes the button full width. Every dynamic value is HTML-escaped (the buyer
  * name is user input) and substituted in a single pass, so a value can never be read as a placeholder.
  *
- * <p>The images are the frontend's {@code public/email/} folder (logo-tiam.png, desafio-hero.jpg): a sent email
- * keeps pointing at those URLs for good, so the names there are stable. They are served from the same folder
+ * <p>The images are the frontend's {@code public/email/} folder (logo-tiam-badge.png, desafio-hero.jpg): a sent
+ * email keeps pointing at those URLs for good, so the names there are stable. The logo is a badge (the logo on a
+ * white tile with rounded, transparent corners), not the plain logo-tiam.png: that one is an opaque white
+ * rectangle, which shows as a white box as soon as a client (Gmail, Apple Mail) darkens the header. They are served from the same folder
  * as the Pack emails' ({@code EMAIL_ASSETS_BASE_URL}); anything that is not public https falls back to the
  * production default, because an image a buyer's phone cannot open turns the email into a page of empty boxes.
  */
@@ -45,7 +47,7 @@ public class ChallengeAccessEmailComposer {
     static final String SUBJECT = "Tu Desafío TIAM está listo";
     static final String IDEMPOTENCY_KEY_PREFIX = "challenge-access/";
     static final String DEFAULT_ASSETS_BASE_URL = "https://www.tiamdigital.com/email";
-    static final String LOGO_FILE = "logo-tiam.png";
+    static final String LOGO_FILE = "logo-tiam-badge.png";
     static final String HERO_FILE = "desafio-hero.jpg";
 
     private static final String SITE_URL = "https://www.tiamdigital.com";
@@ -337,8 +339,8 @@ public class ChallengeAccessEmailComposer {
                 <td class="outer" align="center" style="padding:24px 12px 32px 12px;">
                   <table role="presentation" class="container" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;border-collapse:separate;border-radius:16px;overflow:hidden;">
                     <tr>
-                      <td align="center" bgcolor="#FFFFFF" style="background-color:#FFFFFF;padding:20px 24px 16px 24px;">
-                        <a href="{{SITE}}" target="_blank" style="text-decoration:none;"><img src="{{LOGO}}" width="120" height="67" alt="TIAM Digital" style="display:block;margin:0 auto;border:0;outline:none;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:24px;line-height:67px;font-weight:800;color:#16263F;"></a>
+                      <td align="center" bgcolor="#FFFFFF" style="background-color:#FFFFFF;padding:12px 24px 12px 24px;">
+                        <a href="{{SITE}}" target="_blank" style="text-decoration:none;"><img src="{{LOGO}}" width="140" height="87" alt="TIAM Digital" style="display:block;margin:0 auto;border:0;outline:none;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:24px;line-height:87px;font-weight:800;color:#16263F;"></a>
                       </td>
                     </tr>
                     <tr>

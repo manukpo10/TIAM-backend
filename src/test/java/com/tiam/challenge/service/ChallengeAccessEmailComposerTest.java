@@ -195,15 +195,17 @@ class ChallengeAccessEmailComposerTest {
         }
         assertThat(found).isEqualTo(2); // the logo and the illustration, nothing else to block
         assertThat(html)
-                .contains("src=\"https://www.tiamdigital.com/email/logo-tiam.png\"")
-                .contains("src=\"https://www.tiamdigital.com/email/desafio-hero.jpg\"");
+                .contains("src=\"https://www.tiamdigital.com/email/logo-tiam-badge.png\"")
+                .contains("src=\"https://www.tiamdigital.com/email/desafio-hero.jpg\"")
+                // the plain logo is an opaque white rectangle: it shows as a white box once a client darkens the header
+                .doesNotContain("/logo-tiam.png");
     }
 
     @Test
     void compose_html_imagesFollowAPublicConfiguredFolderAndIgnoreAnyOtherOne() {
         packProperties.setEmailAssetsBaseUrl("https://cdn.example.com/mail/");
         assertThat(composer.compose(purchase("Ana", "ana@example.com", 1)).html())
-                .contains("src=\"https://cdn.example.com/mail/logo-tiam.png\"")
+                .contains("src=\"https://cdn.example.com/mail/logo-tiam-badge.png\"")
                 .doesNotContain("mail//");
 
         for (String unusable : new String[] {"http://localhost:5173/email", "http://www.tiamdigital.com/email", "", null}) {
