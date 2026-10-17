@@ -6,6 +6,9 @@ import com.tiam.challenge.config.WhatsAppProperties;
 import com.tiam.challenge.domain.ChallengePurchase;
 import com.tiam.challenge.domain.ChallengePurchaseStatus;
 import com.tiam.common.email.EmailMessage;
+import com.tiam.pack.config.PackProperties;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -14,6 +17,7 @@ class ChallengeAccessEmailComposerTest {
     private static final String TOKEN = "11111111-2222-3333-4444-555555555555";
 
     private WhatsAppProperties whatsAppProperties;
+    private PackProperties packProperties;
     private ChallengeAccessEmailComposer composer;
 
     @BeforeEach
@@ -21,7 +25,8 @@ class ChallengeAccessEmailComposerTest {
         whatsAppProperties = new WhatsAppProperties();
         whatsAppProperties.setDesafioPlayBaseUrl("https://www.tiamdigital.com/desafio");
         whatsAppProperties.setBusinessNumber("5492214817297");
-        composer = new ChallengeAccessEmailComposer(whatsAppProperties);
+        packProperties = new PackProperties();
+        composer = new ChallengeAccessEmailComposer(whatsAppProperties, packProperties);
     }
 
     @Test
@@ -131,13 +136,117 @@ class ChallengeAccessEmailComposerTest {
                 .contains("lang=\"es-AR\"")
                 .contains("font-size:18px")      // body copy
                 .contains("font-size:22px")      // button and section headings
-                .contains("font-size:28px")      // title
+                .contains("font-size:30px")      // title
                 .contains("<title>Tu Desafío TIAM está listo</title>")
                 .contains("role=\"presentation\"")
                 // the raw link is repeated as text for clients that block buttons
                 .contains(">https://www.tiamdigital.com/desafio/" + TOKEN + "</a>")
                 // brand orange fails AA contrast for text; it must not be used here
                 .doesNotContainIgnoringCase("#E8531E");
+    }
+
+    // ---- the branded look ---------------------------------------------------------------
+
+    @Test
+    void compose_html_buttonIsBulletproofAndTheLinkIsAlsoPlainText() {
+        String html = composer.compose(purchase("Ana", "ana@example.com", 1)).html();
+        String link = "https://www.tiamdigital.com/desafio/" + TOKEN;
+
+        // a coloured table cell holds the button, so it is still a button where the anchor's padding is ignored
+        assertThat(html).contains("bgcolor=\"#CC4610\"").contains(">Abrir mi Desafío</a>").contains("color:#FFFFFF");
+        // the link is the button's target AND text elsewhere, for clients that block buttons
+        assertThat(count(html, link)).isGreaterThanOrEqualTo(3);
+    }
+
+    @Test
+    void compose_html_usesATableLayoutWithNothingExternal() {
+        String html = composer.compose(purchase("Ana", "ana@example.com", 1)).html();
+
+        assertThat(html).contains("width=\"600\"");
+        assertThat(html)
+                .doesNotContainIgnoringCase("<script")
+                .doesNotContainIgnoringCase("<link")
+                .doesNotContainIgnoringCase("@import")
+                .doesNotContainIgnoringCase("@font-face")
+                .doesNotContainIgnoringCase("url(");
+    }
+
+    @Test
+    void compose_html_hasDarkModeAndMobileRulesAndAPreheaderBeforeTheHeadline() {
+        String html = composer.compose(purchase("Ana", "ana@example.com", 1)).html();
+
+        assertThat(html).contains("prefers-color-scheme: dark").contains("max-width: 520px");
+        int preheader = html.indexOf("Tu acceso personal al Desafío de 30 días ya está activo.");
+        assertThat(preheader).isPositive().isLessThan(html.indexOf("¡Tu Desafío TIAM está listo!</h1>"));
+    }
+
+    @Test
+    void compose_html_everyImageHasAnHttpsNonWebpSourceAndAltText() {
+        String html = composer.compose(purchase("Ana", "ana@example.com", 1)).html();
+
+        Matcher images = Pattern.compile("<img [^>]*>").matcher(html);
+        int found = 0;
+        while (images.find()) {
+            found++;
+            String tag = images.group();
+            assertThat(tag).containsPattern("src=\"https://[^\"]+\"");
+            assertThat(tag).doesNotContainIgnoringCase(".webp");
+            assertThat(tag).containsPattern("alt=\"[^\"]{3,}\"");
+        }
+        assertThat(found).isEqualTo(2); // the logo and the illustration, nothing else to block
+        assertThat(html)
+                .contains("src=\"https://www.tiamdigital.com/email/logo-tiam.png\"")
+                .contains("src=\"https://www.tiamdigital.com/email/desafio-hero.jpg\"");
+    }
+
+    @Test
+    void compose_html_imagesFollowAPublicConfiguredFolderAndIgnoreAnyOtherOne() {
+        packProperties.setEmailAssetsBaseUrl("https://cdn.example.com/mail/");
+        assertThat(composer.compose(purchase("Ana", "ana@example.com", 1)).html())
+                .contains("src=\"https://cdn.example.com/mail/logo-tiam.png\"")
+                .doesNotContain("mail//");
+
+        for (String unusable : new String[] {"http://localhost:5173/email", "http://www.tiamdigital.com/email", "", null}) {
+            packProperties.setEmailAssetsBaseUrl(unusable);
+            assertThat(composer.compose(purchase("Ana", "ana@example.com", 1)).html())
+                    .as("unusable folder: %s", unusable)
+                    .contains("src=\"https://www.tiamdigital.com/email/desafio-hero.jpg\"");
+        }
+    }
+
+    @Test
+    void compose_stayWellUnderGmailsClippingSize() {
+        EmailMessage message = composer.compose(purchase("Manuel Robles", "ana@example.com", 3));
+
+        assertThat(message.html().getBytes(java.nio.charset.StandardCharsets.UTF_8).length).isLessThan(40_000);
+        assertThat(message.text().length()).isLessThan(3_000);
+    }
+
+    @Test
+    void compose_aNameThatLooksLikeAPlaceholderIsPrintedLiterally() {
+        String html = composer.compose(purchase("{{LINK}}", "ana@example.com", 1)).html();
+
+        assertThat(html).contains("Hola {{link}},"); // first name is capitalised like any other, never substituted
+    }
+
+    @Test
+    void compose_theBuyersNameIsCleanedAndCapped() {
+        // a right-to-left override and a zero-width space are dropped; a huge name is cut
+        String cleaned = composer.compose(purchase("‮ana​", "ana@example.com", 1)).html();
+        assertThat(cleaned).contains("Hola Ana,").doesNotContain("‮").doesNotContain("​");
+
+        String longName = "a".repeat(255);
+        EmailMessage message = composer.compose(purchase(longName, "ana@example.com", 1));
+        assertThat(message.html()).doesNotContain("a".repeat(31));
+        assertThat(message.text()).doesNotContain("a".repeat(31));
+    }
+
+    private static int count(String haystack, String needle) {
+        int count = 0;
+        for (int at = haystack.indexOf(needle); at >= 0; at = haystack.indexOf(needle, at + needle.length())) {
+            count++;
+        }
+        return count;
     }
 
     @Test
