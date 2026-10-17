@@ -3,13 +3,22 @@ package com.tiam.challenge.web;
 import com.tiam.challenge.config.ChallengeAdminProperties;
 import com.tiam.challenge.dto.AdminGrantPurchaseRequest;
 import com.tiam.challenge.dto.AdminGrantPurchaseResponse;
+import com.tiam.challenge.dto.ChallengeAccessResponse;
+import com.tiam.challenge.service.ChallengeDeviceService;
 import com.tiam.challenge.service.ChallengePurchaseService;
+import com.tiam.common.exception.ResourceNotFoundException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -34,12 +43,74 @@ class ChallengePurchaseControllerTest {
 
     @Mock ChallengePurchaseService challengePurchaseService;
     @Mock ChallengeAdminProperties challengeAdminProperties;
+    @Mock ChallengeDeviceService challengeDeviceService;
 
     ChallengePurchaseController controller;
 
     @BeforeEach
     void setUp() {
-        controller = new ChallengePurchaseController(challengePurchaseService, challengeAdminProperties);
+        controller = new ChallengePurchaseController(challengePurchaseService, challengeAdminProperties,
+                challengeDeviceService);
+    }
+
+    // --- GET /challenge/{token}: access + device measurement (never blocks) ---------------------
+
+    @Test
+    void getAccess_returnsTheAccess_andRecordsWhichDeviceOpenedIt() {
+        ChallengeAccessResponse access = new ChallengeAccessResponse("Ana", 3, 30, 1);
+        when(challengePurchaseService.getAccess("tok-1")).thenReturn(access);
+
+        var response = controller.getAccess("tok-1", "8d6e4c2a-1b3f-4a5c-9e7d-2f4b6d8a0c1e", "UA");
+
+        assertThat(response.getBody().getData()).isEqualTo(access);
+        verify(challengeDeviceService).recordVisit("tok-1", "8d6e4c2a-1b3f-4a5c-9e7d-2f4b6d8a0c1e", "UA");
+    }
+
+    /** The real HTTP binding: the player sends the id as ?device= and the browser its User-Agent header. */
+    @Test
+    void getAccess_overHttp_bindsTheDeviceQueryParamAndTheUserAgent() throws Exception {
+        when(challengePurchaseService.getAccess("tok-1")).thenReturn(new ChallengeAccessResponse("Ana", 3, 30, 1));
+        MockMvc mvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+        mvc.perform(get("/challenge/tok-1").param("device", "8d6e4c2a-1b3f-4a5c-9e7d-2f4b6d8a0c1e")
+                        .header("User-Agent", "Mozilla/5.0 (iPhone)"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.buyerFirstName").value("Ana"));
+
+        verify(challengeDeviceService).recordVisit("tok-1", "8d6e4c2a-1b3f-4a5c-9e7d-2f4b6d8a0c1e", "Mozilla/5.0 (iPhone)");
+    }
+
+    /** During a deploy the async executor can refuse new work; the buyer must still get in. */
+    @Test
+    void getAccess_whenTheMeasurementCannotBeQueued_stillOpens() {
+        ChallengeAccessResponse access = new ChallengeAccessResponse("Ana", 3, 30, 1);
+        when(challengePurchaseService.getAccess("tok-1")).thenReturn(access);
+        org.mockito.Mockito.doThrow(new org.springframework.core.task.TaskRejectedException("executor shutting down"))
+                .when(challengeDeviceService).recordVisit("tok-1", "8d6e4c2a-1b3f-4a5c-9e7d-2f4b6d8a0c1e", "UA");
+
+        var response = controller.getAccess("tok-1", "8d6e4c2a-1b3f-4a5c-9e7d-2f4b6d8a0c1e", "UA");
+
+        assertThat(response.getBody().getData()).isEqualTo(access);
+    }
+
+    @Test
+    void getAccess_withoutADeviceId_stillOpens() {
+        ChallengeAccessResponse access = new ChallengeAccessResponse("Ana", 3, 30, 1);
+        when(challengePurchaseService.getAccess("tok-1")).thenReturn(access);
+
+        var response = controller.getAccess("tok-1", null, null);
+
+        assertThat(response.getBody().getData()).isEqualTo(access);
+    }
+
+    @Test
+    void getAccess_unknownOrUnpaidToken_recordsNothing() {
+        when(challengePurchaseService.getAccess("nope"))
+                .thenThrow(new ResourceNotFoundException("Challenge access not found"));
+
+        assertThatThrownBy(() -> controller.getAccess("nope", "8d6e4c2a-1b3f-4a5c-9e7d-2f4b6d8a0c1e", "UA"))
+                .isInstanceOf(ResourceNotFoundException.class);
+        verifyNoInteractions(challengeDeviceService);
     }
 
     @Test

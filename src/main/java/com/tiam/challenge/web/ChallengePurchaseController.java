@@ -6,12 +6,15 @@ import com.tiam.challenge.dto.AdminGrantPurchaseResponse;
 import com.tiam.challenge.dto.ChallengeAccessResponse;
 import com.tiam.challenge.dto.CreatePurchaseRequest;
 import com.tiam.challenge.dto.CreatePurchaseResponse;
+import com.tiam.challenge.service.ChallengeDeviceService;
 import com.tiam.challenge.service.ChallengePurchaseService;
 import com.tiam.common.web.ApiResponse;
 import jakarta.validation.Valid;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.util.StringUtils;
@@ -21,8 +24,10 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+@Slf4j
 @RestController
 @RequestMapping("/challenge")
 @RequiredArgsConstructor
@@ -30,6 +35,7 @@ public class ChallengePurchaseController {
 
     private final ChallengePurchaseService challengePurchaseService;
     private final ChallengeAdminProperties challengeAdminProperties;
+    private final ChallengeDeviceService challengeDeviceService;
 
     @PostMapping("/purchases")
     public ResponseEntity<ApiResponse<CreatePurchaseResponse>> createPurchase(
@@ -37,9 +43,24 @@ public class ChallengePurchaseController {
         return ResponseEntity.ok(ApiResponse.ok(challengePurchaseService.createPurchase(request)));
     }
 
+    /**
+     * The player's entry point. {@code device} is the random id the player keeps in the browser: after access is
+     * granted, the visit is counted in the background to learn how many devices open each link (measurement only,
+     * see {@link ChallengeDeviceService}). It never changes the answer, and an unknown token records nothing.
+     */
     @GetMapping("/{accessToken}")
-    public ResponseEntity<ApiResponse<ChallengeAccessResponse>> getAccess(@PathVariable String accessToken) {
-        return ResponseEntity.ok(ApiResponse.ok(challengePurchaseService.getAccess(accessToken)));
+    public ResponseEntity<ApiResponse<ChallengeAccessResponse>> getAccess(
+            @PathVariable String accessToken,
+            @RequestParam(name = "device", required = false) String device,
+            @RequestHeader(value = HttpHeaders.USER_AGENT, required = false) String userAgent) {
+        ChallengeAccessResponse access = challengePurchaseService.getAccess(accessToken);
+        try {
+            challengeDeviceService.recordVisit(accessToken, device, userAgent);
+        } catch (RuntimeException e) {
+            // e.g. the async executor refusing work while a deploy shuts it down: the buyer still gets in.
+            log.warn("Desafío device visit not queued: {}", e.toString());
+        }
+        return ResponseEntity.ok(ApiResponse.ok(access));
     }
 
     /**
