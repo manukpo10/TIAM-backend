@@ -4,6 +4,9 @@ import com.tiam.challenge.config.ChallengeAdminProperties;
 import com.tiam.challenge.dto.AdminGrantPurchaseRequest;
 import com.tiam.challenge.dto.AdminGrantPurchaseResponse;
 import com.tiam.challenge.dto.ChallengeAccessResponse;
+import com.tiam.challenge.dto.ChallengeMonthAccess;
+import com.tiam.challenge.dto.CreatePurchaseResponse;
+import com.tiam.challenge.dto.NextMonthRequest;
 import com.tiam.challenge.service.ChallengeDeviceService;
 import com.tiam.challenge.service.ChallengePurchaseService;
 import com.tiam.common.exception.ResourceNotFoundException;
@@ -13,10 +16,12 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -53,11 +58,53 @@ class ChallengePurchaseControllerTest {
                 challengeDeviceService);
     }
 
+    private static ChallengeAccessResponse anAccess() {
+        return new ChallengeAccessResponse("Ana", 3, 30, 1,
+                java.util.List.of(new ChallengeMonthAccess(1, "tok-1", 3, 30)), 2, 20000);
+    }
+
+    // --- POST /challenge/{token}/next-month: "Renovar y desbloquear el mes siguiente" ---------------
+
+    @Test
+    void nextMonth_returnsTheMercadoPagoCheckoutUrl() {
+        when(challengePurchaseService.createNextMonthPurchase("tok-1", 2))
+                .thenReturn(new CreatePurchaseResponse("https://mp.example/checkout"));
+
+        var response = controller.createNextMonth("tok-1", new NextMonthRequest(2));
+
+        assertThat(response.getBody().getData().checkoutUrl()).isEqualTo("https://mp.example/checkout");
+    }
+
+    /** The player says which month it is offering, so a stale page can never buy a different one. */
+    @Test
+    void nextMonth_overHttp_bindsTheOfferedMonth() throws Exception {
+        when(challengePurchaseService.createNextMonthPurchase("tok-1", 2))
+                .thenReturn(new CreatePurchaseResponse("https://mp.example/checkout"));
+        MockMvc mvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+        mvc.perform(post("/challenge/tok-1/next-month").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"challengeMonth\":2}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.checkoutUrl").value("https://mp.example/checkout"));
+    }
+
+    /** Nothing is typed in the player: no body at all is a valid request. */
+    @Test
+    void nextMonth_withoutABody_isStillAValidRequest() throws Exception {
+        when(challengePurchaseService.createNextMonthPurchase("tok-1", null))
+                .thenReturn(new CreatePurchaseResponse("https://mp.example/checkout"));
+        MockMvc mvc = MockMvcBuilders.standaloneSetup(controller).build();
+
+        mvc.perform(post("/challenge/tok-1/next-month"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.checkoutUrl").value("https://mp.example/checkout"));
+    }
+
     // --- GET /challenge/{token}: access + device measurement (never blocks) ---------------------
 
     @Test
     void getAccess_returnsTheAccess_andRecordsWhichDeviceOpenedIt() {
-        ChallengeAccessResponse access = new ChallengeAccessResponse("Ana", 3, 30, 1);
+        ChallengeAccessResponse access = anAccess();
         when(challengePurchaseService.getAccess("tok-1")).thenReturn(access);
 
         var response = controller.getAccess("tok-1", "8d6e4c2a-1b3f-4a5c-9e7d-2f4b6d8a0c1e", "UA");
@@ -69,7 +116,7 @@ class ChallengePurchaseControllerTest {
     /** The real HTTP binding: the player sends the id as ?device= and the browser its User-Agent header. */
     @Test
     void getAccess_overHttp_bindsTheDeviceQueryParamAndTheUserAgent() throws Exception {
-        when(challengePurchaseService.getAccess("tok-1")).thenReturn(new ChallengeAccessResponse("Ana", 3, 30, 1));
+        when(challengePurchaseService.getAccess("tok-1")).thenReturn(anAccess());
         MockMvc mvc = MockMvcBuilders.standaloneSetup(controller).build();
 
         mvc.perform(get("/challenge/tok-1").param("device", "8d6e4c2a-1b3f-4a5c-9e7d-2f4b6d8a0c1e")
@@ -83,7 +130,7 @@ class ChallengePurchaseControllerTest {
     /** During a deploy the async executor can refuse new work; the buyer must still get in. */
     @Test
     void getAccess_whenTheMeasurementCannotBeQueued_stillOpens() {
-        ChallengeAccessResponse access = new ChallengeAccessResponse("Ana", 3, 30, 1);
+        ChallengeAccessResponse access = anAccess();
         when(challengePurchaseService.getAccess("tok-1")).thenReturn(access);
         org.mockito.Mockito.doThrow(new org.springframework.core.task.TaskRejectedException("executor shutting down"))
                 .when(challengeDeviceService).recordVisit("tok-1", "8d6e4c2a-1b3f-4a5c-9e7d-2f4b6d8a0c1e", "UA");
@@ -95,7 +142,7 @@ class ChallengePurchaseControllerTest {
 
     @Test
     void getAccess_withoutADeviceId_stillOpens() {
-        ChallengeAccessResponse access = new ChallengeAccessResponse("Ana", 3, 30, 1);
+        ChallengeAccessResponse access = anAccess();
         when(challengePurchaseService.getAccess("tok-1")).thenReturn(access);
 
         var response = controller.getAccess("tok-1", null, null);

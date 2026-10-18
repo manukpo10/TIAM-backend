@@ -6,6 +6,7 @@ import com.tiam.challenge.dto.AdminGrantPurchaseResponse;
 import com.tiam.challenge.dto.ChallengeAccessResponse;
 import com.tiam.challenge.dto.CreatePurchaseRequest;
 import com.tiam.challenge.dto.CreatePurchaseResponse;
+import com.tiam.challenge.dto.NextMonthRequest;
 import com.tiam.challenge.service.ChallengeDeviceService;
 import com.tiam.challenge.service.ChallengePurchaseService;
 import com.tiam.common.web.ApiResponse;
@@ -41,6 +42,20 @@ public class ChallengePurchaseController {
     public ResponseEntity<ApiResponse<CreatePurchaseResponse>> createPurchase(
             @Valid @RequestBody CreatePurchaseRequest request) {
         return ResponseEntity.ok(ApiResponse.ok(challengePurchaseService.createPurchase(request)));
+    }
+
+    /**
+     * "Renovar y desbloquear el mes siguiente": starts the Mercado Pago checkout for the next month from inside the
+     * player, with a single tap. Nothing is typed: name, WhatsApp number and email come from the purchase the token
+     * belongs to. The optional body says which month the player offered, so a stale page cannot buy a different one.
+     * Mercado Pago sends the buyer back to their own link, where the new month appears once paid.
+     */
+    @PostMapping("/{accessToken}/next-month")
+    public ResponseEntity<ApiResponse<CreatePurchaseResponse>> createNextMonth(
+            @PathVariable String accessToken, @RequestBody(required = false) NextMonthRequest request) {
+        Integer offeredMonth = request == null ? null : request.challengeMonth();
+        return ResponseEntity.ok(ApiResponse.ok(
+                challengePurchaseService.createNextMonthPurchase(accessToken, offeredMonth)));
     }
 
     /**

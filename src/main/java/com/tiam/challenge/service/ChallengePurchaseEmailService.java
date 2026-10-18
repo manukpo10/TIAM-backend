@@ -132,7 +132,10 @@ public class ChallengePurchaseEmailService {
             return false;
         }
 
-        EmailMessage message = composer.compose(purchase);
+        // One link for the whole Desafío: a month bought from the player is emailed the first purchase's link.
+        EmailMessage message = purchase.getParentPurchaseId() == null
+                ? composer.compose(purchase)
+                : composer.compose(purchase, ChallengeLinkTokens.of(purchase, challengePurchaseRepository));
         if (!emailSender.send(message)) {
             log.warn("Access email for challenge purchase id={} was NOT delivered "
                     + "(email_sent_at stays NULL — see the log lines above for the reason)", purchaseId);

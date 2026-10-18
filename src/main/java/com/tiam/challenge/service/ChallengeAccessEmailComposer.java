@@ -72,7 +72,15 @@ public class ChallengeAccessEmailComposer {
     }
 
     public EmailMessage compose(ChallengePurchase purchase) {
-        String link = accessLink(purchase);
+        return compose(purchase, purchase.getAccessToken());
+    }
+
+    /**
+     * Same email, but the link carries {@code linkToken} instead of the purchase's own token: a month bought from the
+     * player is reached from the buyer's FIRST link, so that is the one the email sends.
+     */
+    public EmailMessage compose(ChallengePurchase purchase, String linkToken) {
+        String link = accessLinkBase() + "/" + linkToken;
         String name = firstName(purchase.getBuyerName());
         String whatsAppUrl = whatsAppUrl();
         Integer month = purchase.getChallengeMonth();

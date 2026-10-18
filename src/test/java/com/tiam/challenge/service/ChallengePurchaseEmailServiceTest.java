@@ -274,6 +274,57 @@ class ChallengePurchaseEmailServiceTest {
         verify(emailSender, never()).send(any());
     }
 
+    /** One link for the whole Desafío: a later month's email carries the FIRST purchase's link, not its own. */
+    @Test
+    void laterMonth_isEmailedWithTheFirstPurchasesLink() {
+        ChallengePurchase later = purchase(ChallengePurchaseStatus.PAID, "buyer@example.com", null);
+        later.setParentPurchaseId(7L);
+        later.setAccessToken("later-token");
+        ChallengePurchase first = purchase(ChallengePurchaseStatus.PAID, "buyer@example.com", null);
+        first.setId(7L);
+        first.setAccessToken("first-token");
+        when(repository.findById(ID)).thenReturn(Optional.of(later));
+        when(repository.findById(7L)).thenReturn(Optional.of(first));
+        when(composer.compose(later, "first-token")).thenReturn(MESSAGE);
+        when(emailSender.send(MESSAGE)).thenReturn(true);
+        when(repository.markEmailSent(eq(ID), any(Instant.class))).thenReturn(1);
+
+        assertThat(service.sendAccessEmail(ID)).isTrue();
+
+        verify(composer, never()).compose(later);
+    }
+
+    /** A refunded first purchase is deactivated: its token opens nothing, so the month cannot be sent to it. */
+    @Test
+    void laterMonth_whoseFirstPurchaseWasDeactivated_isEmailedItsOwnLink() {
+        ChallengePurchase later = purchase(ChallengePurchaseStatus.PAID, "buyer@example.com", null);
+        later.setParentPurchaseId(7L);
+        ChallengePurchase first = purchase(ChallengePurchaseStatus.PAID, "buyer@example.com", null);
+        first.setId(7L);
+        first.setAccessToken("first-token");
+        first.setActivo(false);
+        when(repository.findById(ID)).thenReturn(Optional.of(later));
+        when(repository.findById(7L)).thenReturn(Optional.of(first));
+        when(composer.compose(later, "token")).thenReturn(MESSAGE);
+        when(emailSender.send(MESSAGE)).thenReturn(true);
+        when(repository.markEmailSent(eq(ID), any(Instant.class))).thenReturn(1);
+
+        assertThat(service.sendAccessEmail(ID)).isTrue();
+    }
+
+    @Test
+    void laterMonth_whoseFirstPurchaseIsGone_fallsBackToItsOwnLink() {
+        ChallengePurchase later = purchase(ChallengePurchaseStatus.PAID, "buyer@example.com", null);
+        later.setParentPurchaseId(7L);
+        when(repository.findById(ID)).thenReturn(Optional.of(later));
+        when(repository.findById(7L)).thenReturn(Optional.empty());
+        when(composer.compose(later, "token")).thenReturn(MESSAGE);
+        when(emailSender.send(MESSAGE)).thenReturn(true);
+        when(repository.markEmailSent(eq(ID), any(Instant.class))).thenReturn(1);
+
+        assertThat(service.sendAccessEmail(ID)).isTrue();
+    }
+
     private static ChallengePurchase purchase(ChallengePurchaseStatus status, String email, Instant emailSentAt) {
         ChallengePurchase purchase = new ChallengePurchase();
         purchase.setId(ID);

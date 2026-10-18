@@ -22,6 +22,9 @@ public interface ChallengePurchaseRepository extends JpaRepository<ChallengePurc
 
     List<ChallengePurchase> findByPhoneAndActivoTrue(String phone);
 
+    /** The months bought from the player on top of a first purchase (see {@code parentPurchaseId}). */
+    List<ChallengePurchase> findByParentPurchaseIdAndActivoTrue(Long parentPurchaseId);
+
     /**
      * Row-locking read for webhook-driven status transitions — closes the
      * read-then-write race between two near-simultaneous webhook deliveries

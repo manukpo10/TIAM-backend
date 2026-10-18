@@ -52,6 +52,17 @@ class ChallengeAccessEmailComposerTest {
         assertThat(message.text()).contains(expectedLink);
     }
 
+    /** A later month is reached from the FIRST purchase's link: the caller passes that token for the link. */
+    @Test
+    void compose_withALinkToken_linksToThatTokenInsteadOfThePurchasesOwn() {
+        EmailMessage message = composer.compose(purchase("Ana", "ana@example.com", 2), "first-purchase-token");
+        String expectedLink = "https://www.tiamdigital.com/desafio/first-purchase-token";
+
+        assertThat(message.html()).contains("href=\"" + expectedLink + "\"").doesNotContain(TOKEN);
+        assertThat(message.text()).contains(expectedLink).doesNotContain(TOKEN);
+        assertThat(message.idempotencyKey()).as("still per purchase").isEqualTo("challenge-access/42");
+    }
+
     @Test
     void compose_baseUrlWithTrailingSlash_doesNotProduceADoubleSlash() {
         whatsAppProperties.setDesafioPlayBaseUrl("https://www.tiamdigital.com/desafio/");

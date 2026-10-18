@@ -2,6 +2,7 @@ package com.tiam.challenge.service;
 
 import com.mercadopago.exceptions.MPApiException;
 import com.mercadopago.exceptions.MPException;
+import com.mercadopago.resources.payment.Payment;
 import com.tiam.challenge.config.WhatsAppProperties;
 import com.tiam.challenge.domain.ChallengeDayCatalog;
 import com.tiam.challenge.domain.ChallengePurchase;
@@ -10,6 +11,7 @@ import com.tiam.challenge.domain.ChallengePurchaseStatus;
 import com.tiam.challenge.dto.AdminGrantPurchaseRequest;
 import com.tiam.challenge.dto.AdminGrantPurchaseResponse;
 import com.tiam.challenge.dto.ChallengeAccessResponse;
+import com.tiam.challenge.dto.ChallengeMonthAccess;
 import com.tiam.challenge.dto.CreatePurchaseRequest;
 import com.tiam.challenge.dto.CreatePurchaseResponse;
 import com.tiam.challenge.repository.ChallengePurchaseRepository;
@@ -34,6 +36,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 @Slf4j
 @Service
@@ -44,6 +47,9 @@ public class ChallengePurchaseService {
     private static final String ITEM_TITLE = "Desafío 30 días - TIAM Digital";
     private static final ZoneId ZONE = ZoneId.of("America/Argentina/Buenos_Aires");
     private static final int TOTAL_DAYS = 30;
+    private static final String STATUS_APPROVED = "approved";
+    private static final String STATUS_REJECTED = "rejected";
+    private static final String STATUS_CANCELLED = "cancelled";
     /**
      * How many months are on sale — the ceiling for both the explicit-month
      * allowlist and {@link #nextUnpaidMonth}'s auto-assignment.
@@ -88,7 +94,7 @@ public class ChallengePurchaseService {
         }
 
         if (requestedMonth != null) {
-            return createPurchaseForMonth(request, requestedMonth);
+            return createPurchaseForMonth(request, requestedMonth, null);
         }
 
         // Auto-assign path only (explicit-month callers have nothing to race
@@ -118,11 +124,13 @@ public class ChallengePurchaseService {
         Object lock = autoAssignLocksByPhone.computeIfAbsent(normalizedPhone, key -> new Object());
         synchronized (lock) {
             int challengeMonth = nextUnpaidMonth(request.phone());
-            return createPurchaseForMonth(request, challengeMonth);
+            return createPurchaseForMonth(request, challengeMonth, null);
         }
     }
 
-    private CreatePurchaseResponse createPurchaseForMonth(CreatePurchaseRequest request, int challengeMonth) {
+    /** @param parentPurchaseId the buyer's first purchase when this month is bought from the player; null otherwise */
+    private CreatePurchaseResponse createPurchaseForMonth(
+            CreatePurchaseRequest request, int challengeMonth, Long parentPurchaseId) {
         if (!mercadoPagoService.isConfigured()) {
             throw new BadRequestException(
                     "Payment processing is not available yet. Please try again later.");
@@ -135,14 +143,26 @@ public class ChallengePurchaseService {
         purchase.setStatus(ChallengePurchaseStatus.PENDING);
         purchase.setAccessToken(UUID.randomUUID().toString());
         purchase.setChallengeMonth(challengeMonth);
+        purchase.setParentPurchaseId(parentPurchaseId);
         purchase = challengePurchaseRepository.save(purchase);
 
+        return startCheckout(purchase, null);
+    }
+
+    /**
+     * Creates the Mercado Pago preference of a pending purchase and returns where to send the buyer.
+     *
+     * @param returnUrl where Mercado Pago sends the buyer back, or null for the default return page
+     */
+    private CreatePurchaseResponse startCheckout(ChallengePurchase purchase, String returnUrl) {
         String externalReference = String.valueOf(purchase.getId());
-        String itemTitle = itemTitleFor(challengeMonth);
+        String itemTitle = itemTitleFor(purchase.getChallengeMonth());
 
         try {
-            String initPoint = mercadoPagoService.createPreference(
-                    itemTitle, PRICE_ARS, request.email(), externalReference);
+            String initPoint = returnUrl == null
+                    ? mercadoPagoService.createPreference(itemTitle, PRICE_ARS, purchase.getEmail(), externalReference)
+                    : mercadoPagoService.createPreference(
+                            itemTitle, PRICE_ARS, purchase.getEmail(), externalReference, returnUrl);
             return new CreatePurchaseResponse(initPoint);
         } catch (MPException | MPApiException e) {
             log.error("Failed to create MP preference for purchase id={}: {}",
@@ -186,8 +206,8 @@ public class ChallengePurchaseService {
         }
 
         String normalizedPhone = PhoneNumberUtil.normalize(request.phone());
-        Optional<ChallengePurchase> existing = challengePurchaseRepository.findByPhoneAndActivoTrue(normalizedPhone)
-                .stream()
+        List<ChallengePurchase> ofThisPhone = challengePurchaseRepository.findByPhoneAndActivoTrue(normalizedPhone);
+        Optional<ChallengePurchase> existing = ofThisPhone.stream()
                 .filter(p -> p.getStatus() == ChallengePurchaseStatus.PAID
                         && p.getChallengeMonth().equals(request.challengeMonth()))
                 .findFirst();
@@ -205,6 +225,13 @@ public class ChallengePurchaseService {
         purchase.setAccessToken(UUID.randomUUID().toString());
         purchase.setChallengeMonth(request.challengeMonth());
         purchase.setPurchaseDate(Instant.now());
+        // One link for the whole Desafío: a month granted to a buyer who already has a first purchase joins its chain,
+        // so the owner hands over the link the buyer already uses (most buyers pay by transfer, not from the player).
+        purchase.setParentPurchaseId(ofThisPhone.stream()
+                .filter(p -> p.getStatus() == ChallengePurchaseStatus.PAID && p.getParentPurchaseId() == null)
+                .min(Comparator.comparing(ChallengePurchase::getChallengeMonth))
+                .map(ChallengePurchase::getId)
+                .orElse(null));
         purchase = challengePurchaseRepository.save(purchase);
 
         log.info("Manually granted challenge month={} to phone={} (buyer={}, purchase id={})",
@@ -281,7 +308,31 @@ public class ChallengePurchaseService {
             purchase.setActivo(false);
             challengePurchaseRepository.save(purchase);
             log.info("Challenge purchase id={} deactivated", purchaseId);
+            promoteNewHeadOfChain(purchase);
         });
+    }
+
+    /**
+     * The months a buyer paid for from the player hang from their first purchase. When that first purchase is closed
+     * (a refunded pack order), the lowest PAID month takes its place as the head of the chain and the others hang from
+     * it, so the months that are still the buyer's keep sharing one link instead of each standing alone. Months that
+     * were never paid are left as they are: nothing opens them.
+     */
+    private void promoteNewHeadOfChain(ChallengePurchase closed) {
+        List<ChallengePurchase> children = challengePurchaseRepository.findByParentPurchaseIdAndActivoTrue(closed.getId());
+        children.stream()
+                .filter(p -> p.getStatus() == ChallengePurchaseStatus.PAID && p.getPurchaseDate() != null)
+                .min(Comparator.comparingInt(ChallengePurchase::getChallengeMonth).thenComparing(ChallengePurchase::getId))
+                .ifPresent(head -> {
+                    head.setParentPurchaseId(null);
+                    challengePurchaseRepository.save(head);
+                    children.stream().filter(p -> p != head).forEach(p -> {
+                        p.setParentPurchaseId(head.getId());
+                        challengePurchaseRepository.save(p);
+                    });
+                    log.info("Challenge purchase id={} is now the head of the chain left by closed purchase id={}",
+                            head.getId(), closed.getId());
+                });
     }
 
     /**
@@ -306,9 +357,10 @@ public class ChallengePurchaseService {
     }
 
     private AdminGrantPurchaseResponse toGrantResponse(ChallengePurchase purchase) {
-        String link = whatsAppProperties.getDesafioPlayBaseUrl() + "/" + purchase.getAccessToken();
+        String linkToken = linkTokenOf(purchase);
+        String link = whatsAppProperties.getDesafioPlayBaseUrl() + "/" + linkToken;
         return new AdminGrantPurchaseResponse(
-                purchase.getAccessToken(), link, purchase.getBuyerName(), purchase.getChallengeMonth());
+                linkToken, link, purchase.getBuyerName(), purchase.getChallengeMonth());
     }
 
     /**
@@ -403,9 +455,203 @@ public class ChallengePurchaseService {
     public ChallengeAccessResponse getAccess(String accessToken) {
         ChallengePurchase purchase = resolvePaidPurchase(accessToken);
         int currentDay = computeCurrentDay(purchase.getPurchaseDate());
+        List<ChallengePurchase> chain = paidChainOf(purchase);
+        Integer nextMonth = nextMonthFor(chain);
 
         return new ChallengeAccessResponse(
-                firstName(purchase.getBuyerName()), currentDay, TOTAL_DAYS, purchase.getChallengeMonth());
+                firstName(purchase.getBuyerName()), currentDay, TOTAL_DAYS, purchase.getChallengeMonth(),
+                chain.stream()
+                        .map(p -> new ChallengeMonthAccess(
+                                p.getChallengeMonth(), p.getAccessToken(), computeCurrentDay(p.getPurchaseDate()), TOTAL_DAYS))
+                        .toList(),
+                nextMonth,
+                nextMonth == null ? null : PRICE_ARS.intValueExact());
+    }
+
+    /** The newest month's value of a contact field that is not blank (the buyer's latest data), or null. */
+    private static String contactOnFile(List<ChallengePurchase> chain, java.util.function.Function<ChallengePurchase, String> field) {
+        for (int i = chain.size() - 1; i >= 0; i--) {
+            String value = field.apply(chain.get(i));
+            if (StringUtils.hasText(value)) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Continues the Desafío with the next month, bought from the player near the end of the current one, with a single
+     * tap: the buyer types nothing. Name, WhatsApp number and email are the ones on the purchase (the newest month's),
+     * so the number that asks for the link is guaranteed to match. The new month is its own pending purchase (own start
+     * date, own progress) chained to the first purchase, and Mercado Pago sends the buyer back to their OWN link, where
+     * the new month appears once the payment is confirmed. A pending purchase of that month is reused, so tapping twice
+     * never piles up rows — and before it is charged again Mercado Pago is asked whether that purchase already has a
+     * payment: an approved one unlocks the month right here (the buyer is sent to their link instead of paying twice),
+     * one still in process refuses the tap. Concurrent taps queue on a row lock of the buyer's first purchase.
+     *
+     * @param expectedMonth the month the player offered; refused if it is no longer the next one (a stale page)
+     * @throws ResourceNotFoundException unknown or unpaid token
+     * @throws BadRequestException       no month left to buy, a stale offer, no WhatsApp on file, or checkout unavailable
+     */
+    @Transactional
+    public CreatePurchaseResponse createNextMonthPurchase(String accessToken, Integer expectedMonth) {
+        ChallengePurchase purchase = resolvePaidPurchase(accessToken);
+        ChallengePurchase first = firstPurchaseOf(purchase);
+        // Held until this transaction ends: a second tap (another tab, a double tap) waits here, then finds the
+        // pending row the first one created instead of creating its own.
+        challengePurchaseRepository.findWithLockById(first.getId());
+        List<ChallengePurchase> chain = paidChainOf(purchase);
+        Integer nextMonth = nextMonthFor(chain);
+        if (nextMonth == null) {
+            throw new BadRequestException("No queda ningún mes nuevo del Desafío para comprar.");
+        }
+        if (expectedMonth != null && !expectedMonth.equals(nextMonth)) {
+            throw new BadRequestException("Tu Desafío cambió mientras tanto. Recargá la página para ver cómo sigue.");
+        }
+        String phone = contactOnFile(chain, ChallengePurchase::getPhone);
+        if (phone == null || PhoneNumberUtil.normalize(phone).isEmpty()) {
+            throw new BadRequestException("No encontramos un WhatsApp en tu compra. Escribinos y te ayudamos.");
+        }
+        if (!mercadoPagoService.isConfigured()) {
+            throw new BadRequestException("El pago online no está disponible por ahora. Probá de nuevo en un rato.");
+        }
+        String email = contactOnFile(chain, ChallengePurchase::getEmail);
+
+        Optional<ChallengePurchase> pending = challengePurchaseRepository.findByParentPurchaseIdAndActivoTrue(first.getId()).stream()
+                .filter(p -> p.getStatus() == ChallengePurchaseStatus.PENDING && nextMonth.equals(p.getChallengeMonth()))
+                .findFirst();
+        if (pending.isPresent()) {
+            String unlockedUrl = settleEarlierPayment(pending.get(), first);
+            if (unlockedUrl != null) {
+                return new CreatePurchaseResponse(unlockedUrl);
+            }
+        }
+        ChallengePurchase renewal = pending.orElseGet(() -> {
+            ChallengePurchase created = new ChallengePurchase();
+            created.setBuyerName(first.getBuyerName());
+            created.setStatus(ChallengePurchaseStatus.PENDING);
+            created.setAccessToken(UUID.randomUUID().toString());
+            created.setChallengeMonth(nextMonth);
+            created.setParentPurchaseId(first.getId());
+            return created;
+        });
+        renewal.setPhone(PhoneNumberUtil.normalize(phone));
+        renewal.setEmail(email);
+        renewal = challengePurchaseRepository.save(renewal);
+
+        try {
+            return startCheckout(renewal, returnUrlFor(first));
+        } catch (BadRequestException e) {
+            // startCheckout already logged what Mercado Pago said; the buyer reads a plain sentence, not its words.
+            throw new BadRequestException("No pudimos abrir Mercado Pago. Probá de nuevo en un momento.");
+        }
+    }
+
+    /**
+     * Looks, before charging a pending month again, at what Mercado Pago already holds for it. Charging twice for the
+     * same month is the one wrong outcome, so anything unclear refuses the tap.
+     *
+     * @return where to send the buyer when that payment turned out to be approved (the month is marked PAID here, just
+     *         as the webhook would), or null when no payment is in flight and a new checkout may start
+     * @throws BadRequestException a payment of this month is still being processed, or its state cannot be read
+     */
+    private String settleEarlierPayment(ChallengePurchase pending, ChallengePurchase first) {
+        Optional<Payment> found;
+        try {
+            found = mercadoPagoService.findLatestPaymentByExternalReference(String.valueOf(pending.getId()));
+        } catch (MPException | MPApiException e) {
+            log.warn("Could not check the earlier payment of pending challenge purchase id={}: {}",
+                    pending.getId(), e.getMessage());
+            throw new BadRequestException(
+                    "No pudimos confirmar el estado de tu pago anterior. Probá de nuevo en unos minutos.");
+        }
+        if (found.isEmpty()) {
+            return null;
+        }
+        Payment payment = found.get();
+        String status = payment.getStatus();
+        if (STATUS_APPROVED.equals(status)) {
+            log.info("Challenge purchase id={} already has an approved MP payment ({}) — marking PAID instead of charging again",
+                    pending.getId(), payment.getId());
+            markPaid(pending.getId(), String.valueOf(payment.getId()));
+            return ownLinkUrl(first) + "?status=approved";
+        }
+        if (STATUS_REJECTED.equals(status) || STATUS_CANCELLED.equals(status)) {
+            return null;
+        }
+        throw new BadRequestException("Tenés un pago de este mes en proceso. Cuando se acredite se desbloquea solo; "
+                + "si pasó más de un día y no se acreditó, escribinos.");
+    }
+
+    /** The buyer's own link: the public one when the base is configured, otherwise the player route on the current site. */
+    private String ownLinkUrl(ChallengePurchase first) {
+        String publicLink = returnUrlFor(first);
+        return publicLink != null ? publicLink : "/desafio/" + first.getAccessToken();
+    }
+
+    /**
+     * Where Mercado Pago sends a renewing buyer back: their own link. Only a public https base can be a return
+     * address; otherwise (local development) the default return page is used.
+     */
+    private String returnUrlFor(ChallengePurchase first) {
+        String base = whatsAppProperties.getDesafioPlayBaseUrl();
+        if (base == null || !base.strip().toLowerCase().startsWith("https://")) {
+            return null;
+        }
+        String trimmed = base.strip();
+        while (trimmed.endsWith("/")) {
+            trimmed = trimmed.substring(0, trimmed.length() - 1);
+        }
+        return trimmed + "/" + first.getAccessToken();
+    }
+
+    /** The buyer's first purchase: the one a later month points at, or the purchase itself when it is the first. */
+    private ChallengePurchase firstPurchaseOf(ChallengePurchase purchase) {
+        if (purchase.getParentPurchaseId() == null) {
+            return purchase;
+        }
+        // A deactivated first purchase (a refunded pack order) opens nothing: the month then stands on its own.
+        return challengePurchaseRepository.findById(purchase.getParentPurchaseId())
+                .filter(ChallengePurchase::isActivo)
+                .orElse(purchase);
+    }
+
+    /** The first purchase plus the PAID months bought from the player, lowest month first. */
+    private List<ChallengePurchase> paidChainOf(ChallengePurchase purchase) {
+        ChallengePurchase first = firstPurchaseOf(purchase);
+        List<ChallengePurchase> chain = new java.util.ArrayList<>();
+        chain.add(first);
+        chain.addAll(challengePurchaseRepository.findByParentPurchaseIdAndActivoTrue(first.getId()));
+        // One entry per month (two taps that both got paid must not show two tabs): the earliest purchase wins.
+        java.util.Map<Integer, ChallengePurchase> byMonth = new java.util.TreeMap<>();
+        chain.stream()
+                .filter(p -> p.isActivo() && p.getStatus() == ChallengePurchaseStatus.PAID && p.getPurchaseDate() != null)
+                .forEach(p -> byMonth.merge(p.getChallengeMonth(), p,
+                        (a, b) -> b.getPurchaseDate().isBefore(a.getPurchaseDate()) ? b : a));
+        return List.copyOf(byMonth.values());
+    }
+
+    /**
+     * The month the player may offer after the ones in {@code chain}: the one right after the highest owned, as long
+     * as it is on sale and no purchase under any of the chain's phones already holds it (a month bought separately,
+     * before the single link existed, must not be sold twice). Null when there is nothing to offer.
+     */
+    private Integer nextMonthFor(List<ChallengePurchase> chain) {
+        int candidate = chain.stream().mapToInt(ChallengePurchase::getChallengeMonth).max().orElse(0) + 1;
+        if (candidate > MONTHS_ON_SALE) {
+            return null;
+        }
+        boolean ownedByPhone = chain.stream()
+                .map(ChallengePurchase::getPhone)
+                .filter(phone -> phone != null && !phone.isBlank())
+                .distinct()
+                .anyMatch(phone -> paidMonthsForNormalized(phone).contains(candidate));
+        return ownedByPhone ? null : candidate;
+    }
+
+    /** The token of the link a purchase's buyer opens: the first purchase's, whichever month this purchase is. */
+    String linkTokenOf(ChallengePurchase purchase) {
+        return ChallengeLinkTokens.of(purchase, challengePurchaseRepository);
     }
 
     /**
@@ -506,7 +752,15 @@ public class ChallengePurchaseService {
             ChallengePurchase purchase = activePurchase.get();
             int currentDay = computeCurrentDay(purchase.getPurchaseDate());
             String firstName = firstName(purchase.getBuyerName());
-            String link = whatsAppProperties.getDesafioPlayBaseUrl() + "/" + purchase.getAccessToken();
+            String link = whatsAppProperties.getDesafioPlayBaseUrl() + "/" + linkTokenOf(purchase);
+
+            // Several months under one link: no single "Día X" is true for all of them, so list the months instead.
+            List<ChallengePurchase> chain = paidChainOf(purchase);
+            if (chain.size() > 1) {
+                return "¡Hola " + firstName + "! 👋 Acá está tu Desafío 30 días:\n" + link
+                        + "\n\nTenés los meses " + joinMonths(chain) + " en este mismo link: elegí el que quieras arriba "
+                        + "y hacé los ejercicios a tu ritmo. 🌱";
+            }
 
             if (currentDay < TOTAL_DAYS) {
                 return "¡Hola " + firstName + "! 👋 Acá está tu ejercicio del Día " + currentDay + " de " + TOTAL_DAYS + ":\n" + link
@@ -525,6 +779,14 @@ public class ChallengePurchaseService {
 
         return "¡Hola! No encontramos ninguna compra activa asociada a este número. "
                 + "Conocé el Desafío 30 días de TIAM acá: " + whatsAppProperties.getSalesPageUrl();
+    }
+
+    /** "1 y 2", "1, 2 y 3". */
+    private static String joinMonths(List<ChallengePurchase> chain) {
+        List<String> months = chain.stream().map(p -> String.valueOf(p.getChallengeMonth())).toList();
+        return months.size() == 1
+                ? months.get(0)
+                : String.join(", ", months.subList(0, months.size() - 1)) + " y " + months.get(months.size() - 1);
     }
 
     /**

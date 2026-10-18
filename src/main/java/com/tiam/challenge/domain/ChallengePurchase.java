@@ -55,4 +55,12 @@ public class ChallengePurchase extends BaseEntity {
      */
     @Column(name = "email_sent_at")
     private Instant emailSentAt;
+
+    /**
+     * The buyer's FIRST purchase, set on a month bought from the player ("Seguí con el Mes 2"); null on a first
+     * purchase. Every month is reached from the first purchase's link, so the access email and the WhatsApp reply
+     * of a later month carry the first purchase's token. Always the first purchase, never a middle link.
+     */
+    @Column(name = "parent_purchase_id")
+    private Long parentPurchaseId;
 }

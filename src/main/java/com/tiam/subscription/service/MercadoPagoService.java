@@ -113,6 +113,16 @@ public class MercadoPagoService {
      */
     public String createPreference(String itemTitle, BigDecimal amount, String payerEmail,
             String externalReference) throws MPException, MPApiException {
+        return createPreference(itemTitle, amount, payerEmail, externalReference, challengeProperties.getBackUrl());
+    }
+
+    /**
+     * Same as {@link #createPreference(String, BigDecimal, String, String)}, sending the buyer back to {@code backUrl}
+     * (success, failure and pending) instead of the default return page — used to bring a renewing buyer straight back
+     * to their own Desafío link.
+     */
+    public String createPreference(String itemTitle, BigDecimal amount, String payerEmail,
+            String externalReference, String backUrl) throws MPException, MPApiException {
         initSdk();
 
         PreferenceItemRequest item = PreferenceItemRequest.builder()
@@ -123,9 +133,9 @@ public class MercadoPagoService {
                 .build();
 
         PreferenceBackUrlsRequest backUrls = PreferenceBackUrlsRequest.builder()
-                .success(challengeProperties.getBackUrl())
-                .failure(challengeProperties.getBackUrl())
-                .pending(challengeProperties.getBackUrl())
+                .success(backUrl)
+                .failure(backUrl)
+                .pending(backUrl)
                 .build();
 
         PreferenceRequest.PreferenceRequestBuilder requestBuilder = PreferenceRequest.builder()
