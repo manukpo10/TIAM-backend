@@ -10,17 +10,22 @@ import java.util.Optional;
  * ({@code packs/v1/...} to {@code packs/v2/...}) so replacing a PDF never breaks an old order.
  *
  * <p>An order gets the pack files of ITS edition for both papers and, when it bought the extra
- * booklet, the extra of the SAME edition.
+ * booklet, the extra of the SAME edition. A «Cuadernos TIAM» order gets the collection and the four workbooks
+ * (10 files) and never the extra booklet, whatever its flag says: the two products share no file code.
  */
 public final class PackCatalog {
 
     private static final List<PackFile> PACK_FILES = buildPackFiles();
     private static final List<PackFile> EXTRA_FILES = buildExtraFiles();
+    private static final List<PackFile> CUADERNOS_FILES = buildCuadernosFiles();
 
     private PackCatalog() {
     }
 
     public static List<PackFile> filesFor(PackEdition edition, boolean withExtra) {
+        if (edition.isCuadernos()) {
+            return CUADERNOS_FILES;
+        }
         List<PackFile> files = new ArrayList<>(PACK_FILES);
         if (withExtra) {
             files.addAll(EXTRA_FILES);
@@ -43,6 +48,25 @@ public final class PackCatalog {
                     "Pack completo (1 PDF)", "pack-completo.pdf", "completo", 19));
             files.add(new PackFile("cuadernillos-" + paper.slug(), PackProduct.PACK, paper,
                     "Cuadernillos sueltos (ZIP)", "cuadernillos.zip", "cuadernillos", 38));
+        }
+        return List.copyOf(files);
+    }
+
+    /** Per paper: the complete collection first (the file most buyers want), then the four workbooks in level order. */
+    private static List<PackFile> buildCuadernosFiles() {
+        String[][] workbooks = {
+                {"Cuaderno 1 · Nivel inicial", "cuaderno-1-inicial"},
+                {"Cuaderno 2 · Nivel intermedio", "cuaderno-2-intermedio"},
+                {"Cuaderno 3 · Nivel intermedio alto", "cuaderno-3-intermedio-alto"},
+                {"Cuaderno 4 · Nivel avanzado", "cuaderno-4-avanzado"}};
+        List<PackFile> files = new ArrayList<>();
+        for (PackPaper paper : PackPaper.values()) {
+            files.add(new PackFile("coleccion-completa-" + paper.slug(), PackProduct.PACK, paper,
+                    "Colección completa: los 4 cuadernos en 1 PDF", "coleccion-completa.pdf", "coleccion-completa", 27));
+            for (int n = 1; n <= workbooks.length; n++) {
+                files.add(new PackFile("cuaderno-" + n + "-" + paper.slug(), PackProduct.PACK, paper,
+                        workbooks[n - 1][0], "cuaderno-" + n + ".pdf", workbooks[n - 1][1], 7));
+            }
         }
         return List.copyOf(files);
     }

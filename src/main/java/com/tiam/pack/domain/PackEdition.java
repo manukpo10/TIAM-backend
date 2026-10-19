@@ -1,12 +1,22 @@
 package com.tiam.pack.domain;
 
+import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 
-/** The two printable editions. They share the layout and the price; they differ in the files. */
+/**
+ * What an order is for. The two printable editions of the basic Pack share the layout and the price and differ
+ * in the files; {@link #CUADERNOS} is the other main product («Cuadernos TIAM»: 4 workbooks), sold through the
+ * same checkout, orders, emails and downloads but with its own files, price and sales switch.
+ *
+ * <p>Stored by name in {@code pack_orders.edition} (VARCHAR(20), no CHECK), so a new value needs no migration.
+ */
 public enum PackEdition {
     FAMILIAS("familias", "Familias"),
-    PROFESIONALES("profesionales", "Profesionales");
+    PROFESIONALES("profesionales", "Profesionales"),
+    CUADERNOS("cuadernos", "Cuadernos");
+
+    private static final List<PackEdition> PACK_EDITIONS = List.of(FAMILIAS, PROFESIONALES);
 
     private final String slug;
     private final String displayName;
@@ -23,6 +33,16 @@ public enum PackEdition {
 
     public String displayName() {
         return displayName;
+    }
+
+    /** True for the «Cuadernos TIAM» product, false for the two editions of the basic Pack. */
+    public boolean isCuadernos() {
+        return this == CUADERNOS;
+    }
+
+    /** The editions of the basic Pack (everything except the Cuadernos). */
+    public static List<PackEdition> packEditions() {
+        return PACK_EDITIONS;
     }
 
     public static Optional<PackEdition> fromSlug(String raw) {

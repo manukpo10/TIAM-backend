@@ -141,6 +141,11 @@ tiam:
     price-ars: ${PACK_PRICE_ARS:14990}
     games-price-ars: ${PACK_GAMES_PRICE_ARS:10000}
     extra-price-ars: ${PACK_EXTRA_PRICE_ARS:4990}
+    cuadernos:
+      # «Cuadernos TIAM» (4 workbooks): same checkout and delivery as the Pack, its own switch and price.
+      # The Desafío add-on reuses PACK_GAMES_PRICE_ARS; the extra booklet does not apply.
+      sales-enabled: ${CUADERNOS_SALES_ENABLED:false}
+      price-ars: ${CUADERNOS_PRICE_ARS:14990}
     landing-base-url: ${PACK_LANDING_BASE_URL:http://localhost:5173}
     thankyou-url: ${PACK_THANKYOU_URL:http://localhost:5173/pack/gracias}
     download-base-url: ${PACK_DOWNLOAD_BASE_URL:http://localhost:5173/pack/descargas}

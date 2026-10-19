@@ -62,6 +62,9 @@ public class PackProperties {
     /** Receives operational alerts (amount mismatch, double payment). Falls back to {@link #regretNotifyTo}. */
     private String ownerNotifyTo = "";
 
+    /** The «Cuadernos TIAM» product: sold through the same machinery but with its own switch and price. */
+    private final Cuadernos cuadernos = new Cuadernos();
+
     private final Reconciliation reconciliation = new Reconciliation();
     private final EmailRetry emailRetry = new EmailRetry();
     private final Downloads downloads = new Downloads();
@@ -84,6 +87,20 @@ public class PackProperties {
             return regret;
         }
         return ownerNotifyTo == null ? "" : ownerNotifyTo.strip();
+    }
+
+    /**
+     * Settings of the «Cuadernos TIAM» product ({@code tiam.pack.cuadernos}). The switch is independent from
+     * {@link PackProperties#salesEnabled}: either product can be on while the other is off. The Desafío add-on
+     * reuses {@link PackProperties#gamesPriceArs}; the extra booklet does not apply to this product.
+     */
+    @Getter
+    @Setter
+    public static class Cuadernos {
+        /** Master switch for starting a Cuadernos checkout. Paid orders keep working when it is off. */
+        private boolean salesEnabled = false;
+        /** Server-side price (provisional, set it with CUADERNOS_PRICE_ARS). */
+        private BigDecimal priceArs = new BigDecimal("14990");
     }
 
     @Getter

@@ -52,6 +52,10 @@ services:
         sync: false
       - key: PACK_EXTRA_PRICE_ARS
         sync: false
+      - key: CUADERNOS_SALES_ENABLED
+        sync: false
+      - key: CUADERNOS_PRICE_ARS
+        sync: false
       - key: PACK_LANDING_BASE_URL
         sync: false
       - key: PACK_THANKYOU_URL

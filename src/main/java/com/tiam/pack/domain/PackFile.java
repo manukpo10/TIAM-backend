@@ -8,7 +8,8 @@ package com.tiam.pack.domain;
  * @param paper        A4 or Carta
  * @param label        buyer-facing description (Spanish)
  * @param storageName  file name under {@code packs/<version>/<edition>/<paper>/}
- * @param downloadKind short word used in the download file name ("completo", "cuadernillos"); null for the extra
+ * @param downloadKind short word used in the download file name ("completo", "cuadernillos", "cuaderno-1-inicial");
+ *                     null for the extra
  * @param sizeMb       approximate size, shown so the buyer knows what a download weighs
  */
 public record PackFile(
@@ -28,6 +29,9 @@ public record PackFile(
     /** ASCII-only name the browser saves the file as. */
     public String downloadFilename(PackEdition edition) {
         String extension = storageName.substring(storageName.lastIndexOf('.'));
+        if (edition.isCuadernos()) {
+            return "TIAM-Cuadernos-" + paper.displayName() + "-" + downloadKind + extension;
+        }
         if (product == PackProduct.EXTRA) {
             return "TIAM-Cuadernillo-extra-" + edition.displayName() + "-" + paper.displayName() + extension;
         }
