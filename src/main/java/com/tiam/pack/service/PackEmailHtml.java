@@ -60,6 +60,15 @@ final class PackEmailHtml {
      * areas), then {@code rows} (each a {@code <tr>} built by this class), then the footer.
      */
     static String page(String title, String preheader, String logoSrc, int logoWidth, int logoHeight, String rows) {
+        return page(title, preheader, logoSrc, logoWidth, logoHeight, rows, "el Pack TIAM");
+    }
+
+    /**
+     * Same, with the closing line of the footer: "Recibiste este email porque compraste {@code bought}."
+     * ({@code "el Pack TIAM"}, {@code "los Cuadernos TIAM"}, {@code "en TIAM"}).
+     */
+    static String page(String title, String preheader, String logoSrc, int logoWidth, int logoHeight, String rows,
+            String bought) {
         Map<String, String> values = Map.of(
                 "TITLE", esc(title),
                 "PREHEADER", esc(preheader),
@@ -68,6 +77,7 @@ final class PackEmailHtml {
                 "LOGO_W", String.valueOf(logoWidth),
                 "LOGO_H", String.valueOf(logoHeight),
                 "SITE", SITE_URL,
+                "BOUGHT", esc(bought),
                 "ROWS", rows);
         return fill(PAGE, values);
     }
@@ -278,7 +288,7 @@ final class PackEmailHtml {
                       <td class="pad" align="center" bgcolor="#16263F" style="background-color:#16263F;padding:28px 36px 30px 36px;font-family:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
                         <p style="margin:0 0 8px 0;font-size:15px;line-height:22px;font-weight:700;color:#FFFFFF;"><a href="{{SITE}}" target="_blank" style="color:#FFFFFF;text-decoration:none;">TIAM &middot; tiamdigital.com</a></p>
                         <p style="margin:0 0 10px 0;font-size:13px;line-height:20px;color:#B5C5DB;">Material de estimulación cognitiva. No reemplaza la evaluación ni el tratamiento de un profesional de la salud.</p>
-                        <p style="margin:0;font-size:12px;line-height:18px;color:#8FA3BF;">Recibiste este email porque compraste el Pack TIAM.</p>
+                        <p style="margin:0;font-size:12px;line-height:18px;color:#8FA3BF;">Recibiste este email porque compraste {{BOUGHT}}.</p>
                       </td>
                     </tr>
                   </table>

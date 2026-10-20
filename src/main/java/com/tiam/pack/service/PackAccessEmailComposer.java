@@ -48,10 +48,16 @@ public class PackAccessEmailComposer {
 
     static final String SUBJECT_FIRST = "Tu Pack TIAM está listo: descargá tus PDF";
     static final String SUBJECT_RESEND = "Tu acceso al Pack TIAM";
+    static final String SUBJECT_FIRST_CUADERNOS = "Tus Cuadernos TIAM están listos: descargá tus PDF";
+    static final String SUBJECT_RESEND_CUADERNOS = "Tu acceso a los Cuadernos TIAM";
+    /** A "lost my link" email that covers a Pack order AND a Cuadernos order. */
+    static final String SUBJECT_RESEND_MIXED = "Tu acceso a tus compras de TIAM";
 
     static final String CTA_LABEL = "Descargar mis archivos";
     static final String DEFAULT_ASSETS_BASE_URL = "https://www.tiamdigital.com/email";
     static final String LOGO_FILE = "logo-tiam.png";
+    /** The Cuadernos picture, served by the frontend's {@code public/email/} next to the logo. */
+    static final String CUADERNOS_IMAGE_FILE = "cuadernos.jpg";
 
     /** The logo file is 286x160 (2x); it is shown at 120x67, the 429:240 ratio of the landings. */
     private static final int LOGO_WIDTH = 120;
@@ -62,35 +68,81 @@ public class PackAccessEmailComposer {
     }
 
     private static final String WHATSAPP_GAMES_TEXT = "Hola, compré el Pack TIAM con el mes de juegos y quiero activarlo.";
+    private static final String WHATSAPP_GAMES_TEXT_CUADERNOS =
+            "Hola, compré los Cuadernos TIAM con el mes de juegos y quiero activarlo.";
     private static final String WHATSAPP_HELP_TEXT = "Hola, necesito ayuda con mi Pack TIAM.";
+    private static final String WHATSAPP_HELP_TEXT_CUADERNOS = "Hola, necesito ayuda con mis Cuadernos TIAM.";
+    private static final String WHATSAPP_HELP_TEXT_MIXED = "Hola, necesito ayuda con mi compra en TIAM.";
 
     private final PackProperties properties;
     private final WhatsAppProperties whatsAppProperties;
     private final PackSalesReadiness readiness;
 
+    /** What an email is about: only the Pack, only the Cuadernos, or (a "lost my link" for a buyer of both) both. */
+    private enum Subject {
+        PACK, CUADERNOS, MIXED;
+
+        static Subject of(List<PackOrder> orders) {
+            boolean cuadernos = orders.stream().anyMatch(order -> order.getEdition().isCuadernos());
+            boolean pack = orders.stream().anyMatch(order -> !order.getEdition().isCuadernos());
+            return cuadernos && pack ? MIXED : cuadernos ? CUADERNOS : PACK;
+        }
+
+        /** Completes "Recibiste este email porque compraste ...". */
+        String boughtLabel() {
+            return switch (this) {
+                case PACK -> "el Pack TIAM";
+                case CUADERNOS -> "los Cuadernos TIAM";
+                case MIXED -> "en TIAM";
+            };
+        }
+
+        /** What a buyer asked to get again, in "pediste el acceso a ... de nuevo". */
+        String accessNoun() {
+            return switch (this) {
+                case PACK -> "tu Pack TIAM";
+                case CUADERNOS -> "tus Cuadernos TIAM";
+                case MIXED -> "tus compras de TIAM";
+            };
+        }
+
+        String helpText() {
+            return switch (this) {
+                case PACK -> WHATSAPP_HELP_TEXT;
+                case CUADERNOS -> WHATSAPP_HELP_TEXT_CUADERNOS;
+                case MIXED -> WHATSAPP_HELP_TEXT_MIXED;
+            };
+        }
+    }
+
     /** What every section of one email needs, resolved once. */
-    private record Context(String name, String recoverLink, String activationUrl, String helpUrl, String assetsBase) {
+    private record Context(String name, String recoverLink, String helpUrl, String assetsBase, Subject subject) {
         String greeting() {
             return name.isEmpty() ? "Hola," : "Hola " + name + ",";
         }
     }
 
-    private Context context(String buyerName) {
-        return new Context(firstName(buyerName), recoverLink(), whatsAppUrl(WHATSAPP_GAMES_TEXT),
-                whatsAppUrl(WHATSAPP_HELP_TEXT), assetsBase());
+    private Context context(String buyerName, Subject subject) {
+        return new Context(firstName(buyerName), recoverLink(), whatsAppUrl(subject.helpText()), assetsBase(), subject);
+    }
+
+    /** The WhatsApp link that opens the chat to activate the games month of THIS order's product. */
+    private String activationUrl(PackOrder order) {
+        return whatsAppUrl(order.getEdition().isCuadernos() ? WHATSAPP_GAMES_TEXT_CUADERNOS : WHATSAPP_GAMES_TEXT);
     }
 
     // ---- the first email ---------------------------------------------------------------------------
 
     /** The email sent right after the payment, with a stable idempotency key (one per order). */
     public EmailMessage compose(PackOrder order, Optional<String> gamesLink) {
-        Context ctx = context(order.getBuyerName());
+        boolean cuadernos = order.getEdition().isCuadernos();
+        Context ctx = context(order.getBuyerName(), cuadernos ? Subject.CUADERNOS : Subject.PACK);
         String link = downloadLink(order);
         String gamesUrl = order.isWithGames() ? usableGamesLink(gamesLink) : null;
 
         return new EmailMessage(
                 order.getEmail().trim(),
-                SUBJECT_FIRST,
+                cuadernos ? SUBJECT_FIRST_CUADERNOS : SUBJECT_FIRST,
                 renderHtml(order, link, ctx, gamesUrl),
                 renderText(order, link, ctx, gamesUrl),
                 "pack-access/" + order.getId());
@@ -98,6 +150,7 @@ public class PackAccessEmailComposer {
 
     private String renderHtml(PackOrder order, String link, Context ctx, String gamesUrl) {
         PackEdition edition = order.getEdition();
+        boolean cuadernos = edition.isCuadernos();
         String days = String.valueOf(properties.getAccessDays());
 
         String cta = PackEmailHtml.button(link, CTA_LABEL, ORANGE)
@@ -106,28 +159,40 @@ public class PackAccessEmailComposer {
                 + "<a href=\"" + esc(link) + "\" style=\"color:#9CC3EE;text-decoration:underline;word-break:break-all;\">"
                 + esc(link) + "</a></p>";
         String intro = "<strong style=\"color:#FFFFFF;\">" + esc(ctx.greeting()) + "</strong> gracias por tu compra. "
-                + "Tus fichas ya están listas para descargar e imprimir.";
+                + (cuadernos ? "Tus cuadernos ya están listos para descargar e imprimir."
+                        : "Tus fichas ya están listas para descargar e imprimir.");
 
         StringBuilder rows = new StringBuilder();
-        rows.append(PackEmailHtml.hero("PACK TIAM · EDICIÓN " + edition.displayName().toUpperCase(Locale.ROOT),
-                "¡Tu Pack TIAM está listo!", intro, cta));
-        rows.append(PackEmailHtml.productImage(ctx.assetsBase() + "/pack-" + edition.slug() + ".jpg", productAlt(edition)));
+        rows.append(PackEmailHtml.hero(
+                cuadernos ? "CUADERNOS TIAM" : "PACK TIAM · EDICIÓN " + edition.displayName().toUpperCase(Locale.ROOT),
+                cuadernos ? "¡Tus Cuadernos TIAM están listos!" : "¡Tu Pack TIAM está listo!", intro, cta));
+        rows.append(PackEmailHtml.productImage(ctx.assetsBase() + "/" + imageFile(edition), productAlt(edition)));
 
         StringBuilder content = new StringBuilder();
         content.append(filesPanel(order, gamesUrl, ctx));
-        content.append(printingTips(edition));
+        content.append(cuadernos ? cuadernosTips() : printingTips(edition));
         content.append(PackEmailHtml.ruleThen(
                 PackEmailHtml.paragraph("<strong>Tu acceso a las descargas dura " + days + " días</strong> desde hoy. "
                         + "El link es personal: no lo compartas.", "")
                         + PackEmailHtml.muted(helpLine(ctx))));
         rows.append(PackEmailHtml.body(content.toString()));
 
-        return PackEmailHtml.page("Tu Pack TIAM", "Tus fichas ya están listas para descargar e imprimir. Tu acceso dura "
-                + days + " días.", ctx.assetsBase() + "/" + LOGO_FILE, LOGO_WIDTH, LOGO_HEIGHT, rows.toString());
+        return PackEmailHtml.page(cuadernos ? "Tus Cuadernos TIAM" : "Tu Pack TIAM",
+                (cuadernos ? "Tus cuadernos ya están listos para descargar e imprimir. Tu acceso dura "
+                        : "Tus fichas ya están listas para descargar e imprimir. Tu acceso dura ") + days + " días.",
+                ctx.assetsBase() + "/" + LOGO_FILE, LOGO_WIDTH, LOGO_HEIGHT, rows.toString(), ctx.subject().boughtLabel());
+    }
+
+    /** The product picture under the headline: one per Pack edition, one for the Cuadernos. */
+    private static String imageFile(PackEdition edition) {
+        return edition.isCuadernos() ? CUADERNOS_IMAGE_FILE : "pack-" + edition.slug() + ".jpg";
     }
 
     /** "Tus archivos": what was bought, one row each, with what it weighs, and the games activation step. */
     private String filesPanel(PackOrder order, String gamesUrl, Context ctx) {
+        if (order.getEdition().isCuadernos()) {
+            return cuadernosFilesPanel(order, gamesUrl);
+        }
         PackEdition edition = order.getEdition();
         StringBuilder rows = new StringBuilder();
         rows.append(PackEmailHtml.fileRow(BLUE, "Pack completo", "PDF · «Empezá acá» y los 12 cuadernillos",
@@ -140,15 +205,47 @@ public class PackAccessEmailComposer {
         }
         if (order.isWithGames()) {
             rows.append(PackEmailHtml.fileRow(PURPLE, "Tu mes de juegos", "Desafío de 30 días · 7 ejercicios nuevos por semana", "",
-                    gamesSteps(gamesUrl, ctx)));
+                    gamesSteps(gamesUrl, activationUrl(order), false)));
         }
         rows.append(PackEmailHtml.panelNote("Cada archivo viene en <strong>A4 y en Carta</strong>: elegí el de tu impresora "
                 + "(si dudás, A4). Podés imprimirlos todas las veces que quieras."));
         return PackEmailHtml.panel("Tus archivos", "Edición " + esc(edition.displayName()), rows.toString());
     }
 
-    /** The games month: open it with the personal link when there is one, and how to activate it by WhatsApp. */
-    private static String gamesSteps(String gamesUrl, Context ctx) {
+    /**
+     * "Tus archivos" of the Cuadernos: the complete collection, each of the four workbooks (names and sizes come from
+     * {@link PackCatalog}) and, when bought, the first month of the Desafío.
+     */
+    private String cuadernosFilesPanel(PackOrder order, String gamesUrl) {
+        StringBuilder rows = new StringBuilder();
+        for (PackFile file : cuadernosFilesOfOnePaper()) {
+            boolean collection = file.code().startsWith("coleccion");
+            rows.append(PackEmailHtml.fileRow(collection ? BLUE : ORANGE, collection ? "Colección completa" : esc(file.label()),
+                    collection ? "PDF · los 4 cuadernos en 1 archivo, para imprimir lo que quieras" : "PDF · para imprimir de a uno",
+                    file.sizeMb() + " MB", ""));
+        }
+        if (order.isWithGames()) {
+            rows.append(PackEmailHtml.fileRow(PURPLE, "Tu primer mes de juegos",
+                    "Desafío de 30 días · empieza por WhatsApp · 7 ejercicios nuevos por semana", "",
+                    gamesSteps(gamesUrl, activationUrl(order), true)));
+        }
+        rows.append(PackEmailHtml.panelNote("Cada archivo viene en <strong>A4 y en Carta</strong>: elegí el de tu impresora "
+                + "(si dudás, A4). Podés imprimirlos todas las veces que quieras."));
+        return PackEmailHtml.panel("Tus archivos", esc("Cuadernos TIAM"), rows.toString());
+    }
+
+    /** The Cuadernos catalog for one paper (the other paper has the same files and sizes). */
+    private static List<PackFile> cuadernosFilesOfOnePaper() {
+        return PackCatalog.filesFor(PackEdition.CUADERNOS, false).stream()
+                .filter(file -> file.code().endsWith("-a4")).toList();
+    }
+
+    /**
+     * The games month: open it with the personal link when there is one, and how to activate it by WhatsApp. For the
+     * Cuadernos offer it also says what the add-on is and is not: ONE month that starts by WhatsApp, the following
+     * ones optional and paid apart at the normal price, no automatic renewal.
+     */
+    private static String gamesSteps(String gamesUrl, String activationUrl, boolean cuadernos) {
         StringBuilder html = new StringBuilder("<div style=\"padding-top:10px;\">");
         if (gamesUrl != null) {
             html.append(PackEmailHtml.muted("Ya está activo: entrá desde tu link personal."));
@@ -158,10 +255,27 @@ public class PackAccessEmailComposer {
             html.append(PackEmailHtml.muted("Para activarlo, escribinos por WhatsApp desde el mismo número que dejaste al comprar: "
                     + "te llega el primer ejercicio."));
         }
-        if (ctx.activationUrl() != null) {
-            html.append(PackEmailHtml.smallButton(ctx.activationUrl(), "Escribir por WhatsApp", GREEN));
+        if (activationUrl != null) {
+            html.append(PackEmailHtml.smallButton(activationUrl, "Escribir por WhatsApp", GREEN));
+        }
+        if (cuadernos) {
+            html.append(PackEmailHtml.muted("Tu compra incluye <strong>un mes</strong> del Desafío, que empieza por WhatsApp. "
+                    + "Los meses siguientes son opcionales: se pagan aparte, al precio normal, desde la página del Desafío. "
+                    + "No se renueva solo."));
         }
         return html.append("</div>").toString();
+    }
+
+    /** Printing tips of the Cuadernos: choose a level, print one at a time, go at your own pace. */
+    private static String cuadernosTips() {
+        return PackEmailHtml.sectionTitle("Para imprimir")
+                + PackEmailHtml.tip(1, "Empezá por tu nivel.", "Los cuadernos van del nivel inicial al avanzado: elegí con cuál "
+                        + "empezar y seguí a tu ritmo.")
+                + PackEmailHtml.tip(2, "Imprimí de a uno.", "Los PDF sueltos pesan menos y te dejan imprimir un cuaderno por vez; "
+                        + "la colección completa trae los cuatro juntos.")
+                + PackEmailHtml.tip(3, "A tu ritmo.", "Los ejercicios se hacen sin ayuda: podés dejar un cuaderno y retomarlo "
+                        + "cuando quieras.")
+                + "<div style=\"height:14px;line-height:14px;font-size:0;\">&nbsp;</div>";
     }
 
     private static String printingTips(PackEdition edition) {
@@ -182,6 +296,9 @@ public class PackAccessEmailComposer {
     }
 
     private static String productAlt(PackEdition edition) {
+        if (edition.isCuadernos()) {
+            return "Cuadernos TIAM: 4 cuadernos con 120 ejercicios de estimulación cognitiva para hacer solo/a";
+        }
         return edition == PackEdition.PROFESIONALES
                 ? "Pack Básico de TIAM, edición para profesionales: 12 cuadernillos y 120 fichas para imprimir"
                 : "Pack Básico de TIAM, edición para familias: 120 fichas para imprimir, con una guía para acompañar";
@@ -190,6 +307,9 @@ public class PackAccessEmailComposer {
     // ---- the first email, plain text -----------------------------------------------------------------
 
     private String renderText(PackOrder order, String link, Context ctx, String gamesUrl) {
+        if (order.getEdition().isCuadernos()) {
+            return renderCuadernosText(order, link, ctx, gamesUrl);
+        }
         PackEdition edition = order.getEdition();
         StringBuilder text = new StringBuilder();
         text.append(ctx.greeting()).append("\n\n");
@@ -208,7 +328,7 @@ public class PackAccessEmailComposer {
         text.append("\n");
 
         if (order.isWithGames()) {
-            appendGamesText(text, gamesUrl, ctx.activationUrl());
+            appendGamesText(text, gamesUrl, activationUrl(order), false);
         }
 
         text.append("PARA IMPRIMIR\n");
@@ -228,20 +348,64 @@ public class PackAccessEmailComposer {
         return text.toString();
     }
 
-    private static void appendGamesText(StringBuilder text, String gamesUrl, String activationUrl) {
+    private static void appendGamesText(StringBuilder text, String gamesUrl, String activationUrl, boolean cuadernos) {
+        String month = cuadernos ? "Tu primer mes de juegos" : "Tu mes de juegos";
         text.append("MES DE JUEGOS\n");
         if (gamesUrl != null) {
-            text.append("Tu mes de juegos del Desafío 30 días está activo. Entrá desde tu link personal:\n")
+            text.append(month).append(" del Desafío 30 días está activo. Entrá desde tu link personal:\n")
                     .append(gamesUrl).append("\n");
             text.append("Para recibir los ejercicios por WhatsApp, escribinos desde el mismo número que dejaste al comprar.\n");
         } else {
-            text.append("Tu mes de juegos del Desafío 30 días está incluido. Para activarlo, escribinos por "
+            text.append(month).append(" del Desafío 30 días está incluido. Para activarlo, escribinos por "
                     + "WhatsApp desde el mismo número que dejaste al comprar: te llega el primer ejercicio.\n");
         }
         if (activationUrl != null) {
             text.append("WhatsApp: ").append(activationUrl).append("\n");
         }
+        if (cuadernos) {
+            text.append(CUADERNOS_GAMES_TERMS).append("\n");
+        }
         text.append("\n");
+    }
+
+    /** What the Cuadernos offer is and is not: one month, started by WhatsApp, the next ones optional and paid apart. */
+    private static final String CUADERNOS_GAMES_TERMS = "Tu compra incluye un mes del Desafío, que empieza por WhatsApp. "
+            + "Los meses siguientes son opcionales: se pagan aparte, al precio normal, desde la página del Desafío. "
+            + "No se renueva solo.";
+
+    /** The first email of a Cuadernos order, as plain text: the same facts as the HTML, from the same catalog. */
+    private String renderCuadernosText(PackOrder order, String link, Context ctx, String gamesUrl) {
+        StringBuilder text = new StringBuilder();
+        text.append(ctx.greeting()).append("\n\n");
+        text.append("¡Gracias por tu compra! Tus Cuadernos TIAM ya están listos para descargar.\n");
+        text.append("\nDESCARGAR MIS ARCHIVOS\n").append(link).append("\n\n");
+
+        text.append("TUS ARCHIVOS (cada uno en A4 y en Carta; si dudás, A4)\n");
+        for (PackFile file : cuadernosFilesOfOnePaper()) {
+            boolean collection = file.code().startsWith("coleccion");
+            text.append("- ").append(collection ? "Colección completa" : file.label())
+                    .append(" (PDF, ").append(file.sizeMb()).append(" MB)");
+            text.append(collection ? ": los 4 cuadernos en 1 archivo, para imprimir lo que quieras.\n" : ".\n");
+        }
+        text.append("\n");
+
+        if (order.isWithGames()) {
+            appendGamesText(text, gamesUrl, activationUrl(order), true);
+        }
+
+        text.append("PARA IMPRIMIR\n");
+        text.append("1. Empezá por tu nivel: los cuadernos van del nivel inicial al avanzado; elegí con cuál empezar.\n");
+        text.append("2. Imprimí de a uno: los PDF sueltos pesan menos y te dejan imprimir un cuaderno por vez.\n");
+        text.append("3. A tu ritmo: los ejercicios se hacen sin ayuda; podés retomar un cuaderno cuando quieras.\n\n");
+
+        text.append("TU ACCESO\n");
+        text.append("- Tu acceso a las descargas dura ").append(properties.getAccessDays()).append(" días desde hoy.\n");
+        text.append("- Este link es personal: no lo compartas. Si lo perdés, pedí uno nuevo acá: ").append(ctx.recoverLink()).append("\n");
+        text.append(ctx.helpUrl() == null
+                ? "- ¿Necesitás ayuda? Escribinos desde tiamdigital.com.\n"
+                : "- ¿Necesitás ayuda? Escribinos por WhatsApp: " + ctx.helpUrl() + "\n");
+        text.append(footerText());
+        return text.toString();
     }
 
     private static String footerText() {
@@ -260,28 +424,47 @@ public class PackAccessEmailComposer {
      * @param idempotencyKey supplied by the caller (it must change between requests or the provider drops them)
      */
     public EmailMessage composeResend(String to, List<ResendEntry> entries, String idempotencyKey) {
-        Context ctx = context(entries.get(0).order().getBuyerName());
-        return new EmailMessage(to, SUBJECT_RESEND, renderResendHtml(entries, ctx), renderResendText(entries, ctx), idempotencyKey);
+        Subject subject = Subject.of(entries.stream().map(ResendEntry::order).toList());
+        Context ctx = context(entries.get(0).order().getBuyerName(), subject);
+        String emailSubject = switch (subject) {
+            case PACK -> SUBJECT_RESEND;
+            case CUADERNOS -> SUBJECT_RESEND_CUADERNOS;
+            case MIXED -> SUBJECT_RESEND_MIXED;
+        };
+        return new EmailMessage(to, emailSubject, renderResendHtml(entries, ctx), renderResendText(entries, ctx), idempotencyKey);
     }
 
     private String renderResendHtml(List<ResendEntry> entries, Context ctx) {
         boolean single = entries.size() == 1;
         String days = String.valueOf(properties.getAccessDays());
+        Subject subject = ctx.subject();
 
-        String intro = "<strong style=\"color:#FFFFFF;\">" + esc(ctx.greeting()) + "</strong> pediste el acceso a tu Pack TIAM de nuevo. "
+        String intro = "<strong style=\"color:#FFFFFF;\">" + esc(ctx.greeting()) + "</strong> pediste el acceso a "
+                + subject.accessNoun() + " de nuevo. "
                 + "Acá tenés " + (single ? "tu link" : "tus links") + ".";
+        String headline = switch (subject) {
+            case PACK -> "Tu acceso al Pack TIAM";
+            case CUADERNOS -> "Tu acceso a los Cuadernos TIAM";
+            case MIXED -> "Tu acceso a tus compras de TIAM";
+        };
         StringBuilder rows = new StringBuilder();
-        rows.append(PackEmailHtml.hero("PACK TIAM", "Tu acceso al Pack TIAM", intro, ""));
+        rows.append(PackEmailHtml.hero(switch (subject) {
+            case PACK -> "PACK TIAM";
+            case CUADERNOS -> "CUADERNOS TIAM";
+            case MIXED -> "TIAM";
+        }, headline, intro, ""));
         if (single) {
             PackEdition edition = entries.get(0).order().getEdition();
-            rows.append(PackEmailHtml.productImage(ctx.assetsBase() + "/pack-" + edition.slug() + ".jpg", productAlt(edition)));
+            rows.append(PackEmailHtml.productImage(ctx.assetsBase() + "/" + imageFile(edition), productAlt(edition)));
         }
 
         StringBuilder content = new StringBuilder();
         for (ResendEntry entry : entries) {
             PackOrder order = entry.order();
             String link = downloadBase() + "/" + entry.token();
-            String label = single ? CTA_LABEL : "Descargar Edición " + esc(order.getEdition().displayName());
+            String label = single ? CTA_LABEL
+                    : order.getEdition().isCuadernos() ? "Descargar Cuadernos TIAM"
+                    : "Descargar Edición " + esc(order.getEdition().displayName());
             content.append(PackEmailHtml.button(link, label, ORANGE));
             content.append("<p class=\"tx-muted\" style=\"margin:14px 0 26px 0;font-size:14px;line-height:21px;color:#4F5F76;\">"
                     + "¿No abre el botón? Copiá este link en tu navegador:<br>"
@@ -299,18 +482,27 @@ public class PackAccessEmailComposer {
                 + (ctx.helpUrl() == null ? "" : PackEmailHtml.link(esc(ctx.helpUrl()), "¿Necesitás ayuda? Escribinos por WhatsApp") + "."))));
         rows.append(PackEmailHtml.body(content.toString()));
 
-        return PackEmailHtml.page("Tu acceso al Pack TIAM", "Tu link nuevo para descargar tus archivos del Pack TIAM.",
-                ctx.assetsBase() + "/" + LOGO_FILE, LOGO_WIDTH, LOGO_HEIGHT, rows.toString());
+        String preheader = switch (subject) {
+            case PACK -> "Tu link nuevo para descargar tus archivos del Pack TIAM.";
+            case CUADERNOS -> "Tu link nuevo para descargar tus archivos de los Cuadernos TIAM.";
+            case MIXED -> "Tus links nuevos para descargar tus archivos de TIAM.";
+        };
+        return PackEmailHtml.page(headline, preheader, ctx.assetsBase() + "/" + LOGO_FILE, LOGO_WIDTH, LOGO_HEIGHT,
+                rows.toString(), subject.boughtLabel());
     }
 
     private String renderResendText(List<ResendEntry> entries, Context ctx) {
         StringBuilder text = new StringBuilder();
         text.append(ctx.greeting()).append("\n\n");
-        text.append("Pediste el acceso a tu Pack TIAM de nuevo. Acá tenés ")
+        text.append("Pediste el acceso a ").append(ctx.subject().accessNoun()).append(" de nuevo. Acá tenés ")
                 .append(entries.size() == 1 ? "tu link" : "tus links").append(":\n\n");
         for (ResendEntry entry : entries) {
             PackOrder order = entry.order();
             PackEdition edition = order.getEdition();
+            if (edition.isCuadernos()) {
+                appendCuadernosResendEntry(text, entry);
+                continue;
+            }
             text.append("Edición ").append(edition.displayName()).append(":\n")
                     .append(downloadBase()).append("/").append(entry.token()).append("\n");
             text.append("Incluye el pack completo (").append(sizeMb(edition, "pack-completo-a4")).append(" MB) y los cuadernillos sueltos (")
@@ -324,8 +516,9 @@ public class PackAccessEmailComposer {
                 text.append(gamesUrl != null
                         ? "Tu mes de juegos del Desafío 30 días: " + gamesUrl + "\n"
                         : "Tu mes de juegos del Desafío 30 días está incluido: escribinos por WhatsApp para activarlo.\n");
-                if (ctx.activationUrl() != null) {
-                    text.append("WhatsApp: ").append(ctx.activationUrl()).append("\n");
+                String activation = activationUrl(order);
+                if (activation != null) {
+                    text.append("WhatsApp: ").append(activation).append("\n");
                 }
             }
             text.append("\n");
@@ -340,6 +533,27 @@ public class PackAccessEmailComposer {
         }
         text.append(footerText());
         return text.toString();
+    }
+
+    /** One Cuadernos order inside a "lost my link" text: its link, what it includes and, if bought, the Desafío month. */
+    private void appendCuadernosResendEntry(StringBuilder text, ResendEntry entry) {
+        PackOrder order = entry.order();
+        text.append("Cuadernos TIAM:\n").append(downloadBase()).append("/").append(entry.token()).append("\n");
+        text.append("Incluye la colección completa (")
+                .append(sizeMb(PackEdition.CUADERNOS, "coleccion-completa-a4")).append(" MB) y los 4 cuadernos sueltos (")
+                .append(sizeMb(PackEdition.CUADERNOS, "cuaderno-1-a4")).append(" MB cada uno), en A4 y en Carta.\n");
+        if (order.isWithGames()) {
+            String gamesUrl = usableGamesLink(entry.gamesLink());
+            text.append(gamesUrl != null
+                    ? "Tu primer mes de juegos del Desafío 30 días: " + gamesUrl + "\n"
+                    : "Tu primer mes de juegos del Desafío 30 días está incluido: escribinos por WhatsApp para activarlo.\n");
+            String activation = activationUrl(order);
+            if (activation != null) {
+                text.append("WhatsApp: ").append(activation).append("\n");
+            }
+            text.append(CUADERNOS_GAMES_TERMS).append("\n");
+        }
+        text.append("\n");
     }
 
     // ---- links and assets ------------------------------------------------------------------------------
