@@ -24,14 +24,18 @@ public class PackPricing {
 
     /**
      * The main product costs {@code PACK_PRICE_ARS} (the Pack, both editions) or {@code CUADERNOS_PRICE_ARS} (the
-     * Cuadernos). The Desafío month costs the same for both ({@code PACK_GAMES_PRICE_ARS}).
+     * Cuadernos). The Desafío add-on costs {@code PACK_GAMES_PRICE_ARS} with the Pack and {@code CUADERNOS_GAMES_PRICE_ARS}
+     * (the offer for the first month) with the Cuadernos.
      */
     public PackPrice calculate(PackEdition edition, PackExtras extras) {
         rejectUnsupportedExtras(edition, extras);
         BigDecimal pack = edition.isCuadernos()
                 ? money(properties.getCuadernos().getPriceArs(), "CUADERNOS_PRICE_ARS", true)
                 : money(properties.getPriceArs(), "PACK_PRICE_ARS", true);
-        BigDecimal games = extras.games() ? money(properties.getGamesPriceArs(), "PACK_GAMES_PRICE_ARS", false) : zero();
+        BigDecimal games = !extras.games() ? zero()
+                : edition.isCuadernos()
+                        ? money(properties.getCuadernos().getGamesPriceArs(), "CUADERNOS_GAMES_PRICE_ARS", false)
+                        : money(properties.getGamesPriceArs(), "PACK_GAMES_PRICE_ARS", false);
         BigDecimal extra = extras.extra() ? money(properties.getExtraPriceArs(), "PACK_EXTRA_PRICE_ARS", false) : zero();
         return new PackPrice(pack, games, extra, pack.add(games).add(extra));
     }

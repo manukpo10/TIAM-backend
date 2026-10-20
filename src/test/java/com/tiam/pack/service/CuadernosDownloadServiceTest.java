@@ -107,7 +107,50 @@ class CuadernosDownloadServiceTest {
 
         PackOrderResponse view = service.view(token);
 
+        assertThat(view.games().link()).isEqualTo("https://tiamdigital.com/desafio/tok");
+    }
+
+    @Test
+    void view_withTheGamesMonth_saysItIsOneMonth_startedByWhatsApp_andTheNextOnesAreOptionalAndPaidApart() {
+        PackOrder order = givenOrder(PackEdition.CUADERNOS, PackOrderStatus.PAID);
+        order.setWithGames(true);
+        order.setChallengePurchaseId(77L);
+        when(challengePurchases.findAccessLinkIfActive(77L)).thenReturn(Optional.of("https://tiamdigital.com/desafio/tok"));
+
+        PackOrderResponse.Games games = service.view(token).games();
+
+        assertThat(games.monthsIncluded()).isEqualTo(1);
+        assertThat(games.startsVia()).isEqualTo("whatsapp");
+        assertThat(games.nextMonthsPaidSeparately()).isTrue();
+        assertThat(games.nextMonthPriceArs()).isEqualTo(20000); // the Desafío's own price, read from its service
+    }
+
+    @Test
+    void view_withTheGamesMonthButNoLink_keepsTheBlockWithANullLink_andTheSameFacts() {
+        PackOrder order = givenOrder(PackEdition.CUADERNOS, PackOrderStatus.PAID);
+        order.setWithGames(true);
+        when(challengePurchases.findAccessLinkIfActive(any())).thenReturn(Optional.empty());
+
+        PackOrderResponse.Games games = service.view(token).games();
+
+        assertThat(games.link()).isNull();
+        assertThat(games.monthsIncluded()).isEqualTo(1);
+    }
+
+    @Test
+    void view_aPackOrderWithGames_hasNoneOfTheCuadernosFacts_soItsResponseIsUnchanged() {
+        PackOrder order = givenOrder(PackEdition.FAMILIAS, PackOrderStatus.PAID);
+        order.setWithGames(true);
+        order.setChallengePurchaseId(77L);
+        when(challengePurchases.findAccessLinkIfActive(77L)).thenReturn(Optional.of("https://tiamdigital.com/desafio/tok"));
+
+        PackOrderResponse view = service.view(token);
+
         assertThat(view.games()).isEqualTo(new PackOrderResponse.Games("https://tiamdigital.com/desafio/tok"));
+        assertThat(view.games().monthsIncluded()).isNull();
+        assertThat(view.games().startsVia()).isNull();
+        assertThat(view.games().nextMonthsPaidSeparately()).isNull();
+        assertThat(view.games().nextMonthPriceArs()).isNull();
     }
 
     @Test

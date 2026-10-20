@@ -48,7 +48,9 @@ class CuadernosConfigTest {
     }
 
     @Test
-    void theGamesMonthKeepsItsOwnPrice_sharedWithThePack() {
+    void theDesafioOffer_hasItsOwnPrice_andThePacksGamesPriceIsUntouched() {
+        assertThat(yaml.getProperty("tiam.pack.cuadernos.games-price-ars")).isEqualTo("${CUADERNOS_GAMES_PRICE_ARS:15000}");
+        assertThat(new PackProperties().getCuadernos().getGamesPriceArs()).isEqualByComparingTo(new BigDecimal("15000"));
         assertThat(yaml.getProperty("tiam.pack.games-price-ars")).isEqualTo("${PACK_GAMES_PRICE_ARS:10000}");
         assertThat(new PackProperties().getGamesPriceArs()).isEqualByComparingTo(new BigDecimal("10000"));
     }
@@ -64,6 +66,7 @@ class CuadernosConfigTest {
     void theBlueprint_declaresTheNewVariables() throws Exception {
         String render = Files.readString(Path.of("render.yaml"));
 
-        assertThat(render).contains("CUADERNOS_SALES_ENABLED").contains("CUADERNOS_PRICE_ARS");
+        assertThat(render).contains("CUADERNOS_SALES_ENABLED").contains("CUADERNOS_PRICE_ARS")
+                .contains("CUADERNOS_GAMES_PRICE_ARS");
     }
 }

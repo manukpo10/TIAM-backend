@@ -64,6 +64,11 @@ public class ChallengePurchaseService {
      */
     private static final int MONTHS_ON_SALE = 4;
 
+    /** What one month of the Desafío costs on its own page (the "normal price" other products refer to). */
+    public static BigDecimal monthPriceArs() {
+        return PRICE_ARS;
+    }
+
     private final ChallengePurchaseRepository challengePurchaseRepository;
     private final MercadoPagoService mercadoPagoService;
     private final WhatsAppProperties whatsAppProperties;

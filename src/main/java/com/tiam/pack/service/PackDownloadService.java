@@ -83,9 +83,13 @@ public class PackDownloadService {
         if (order.isWithExtra() && !order.getEdition().isCuadernos()) {
             items.add(item(order, PackProduct.EXTRA, "EXTRA", "Cuadernillo extra"));
         }
-        PackOrderResponse.Games games = order.isWithGames()
-                ? new PackOrderResponse.Games(challengePurchases.findAccessLinkIfActive(order.getChallengePurchaseId()).orElse(null))
-                : null;
+        PackOrderResponse.Games games = null;
+        if (order.isWithGames()) {
+            String gamesLink = challengePurchases.findAccessLinkIfActive(order.getChallengePurchaseId()).orElse(null);
+            games = order.getEdition().isCuadernos()
+                    ? PackOrderResponse.Games.firstMonthOffer(gamesLink, ChallengePurchaseService.monthPriceArs())
+                    : new PackOrderResponse.Games(gamesLink);
+        }
         return PackOrderResponse.paid(firstName(order.getBuyerName()), order.getEdition().slug(), items, games,
                 order.getAccessExpiresAt(), order.getTotalAmount());
     }

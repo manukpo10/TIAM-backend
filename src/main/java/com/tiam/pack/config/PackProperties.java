@@ -91,8 +91,9 @@ public class PackProperties {
 
     /**
      * Settings of the «Cuadernos TIAM» product ({@code tiam.pack.cuadernos}). The switch is independent from
-     * {@link PackProperties#salesEnabled}: either product can be on while the other is off. The Desafío add-on
-     * reuses {@link PackProperties#gamesPriceArs}; the extra booklet does not apply to this product.
+     * {@link PackProperties#salesEnabled}: either product can be on while the other is off. The Desafío add-on has
+     * its own offer price here (the FIRST month only; the Pack's add-on keeps {@link PackProperties#gamesPriceArs});
+     * the extra booklet does not apply to this product.
      */
     @Getter
     @Setter
@@ -101,6 +102,11 @@ public class PackProperties {
         private boolean salesEnabled = false;
         /** Server-side price of the collection (ARS 20.000 at launch; override with CUADERNOS_PRICE_ARS). */
         private BigDecimal priceArs = new BigDecimal("20000");
+        /**
+         * What the Desafío add-on costs with the Cuadernos: ONE month, started by WhatsApp, no renewal (ARS 15.000;
+         * override with CUADERNOS_GAMES_PRICE_ARS). Later months are bought on the Desafío's own page at its normal price.
+         */
+        private BigDecimal gamesPriceArs = new BigDecimal("15000");
     }
 
     @Getter

@@ -195,7 +195,9 @@ public class PackCheckoutService {
         }
         if (extras.games()) {
             lines.add(new CheckoutLine("juegos", "Mes de juegos - Desafío 30 días TIAM",
-                    "Un mes del Desafío 30 días de TIAM Digital", price.games()));
+                    edition.isCuadernos()
+                            ? "El primer mes del Desafío 30 días de TIAM Digital, sin renovación automática"
+                            : "Un mes del Desafío 30 días de TIAM Digital", price.games()));
         }
         if (extras.extra()) {
             lines.add(new CheckoutLine("cuadernillo-extra", "Cuadernillo extra TIAM",

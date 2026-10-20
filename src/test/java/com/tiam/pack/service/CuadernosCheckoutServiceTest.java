@@ -108,14 +108,41 @@ class CuadernosCheckoutServiceTest {
         givenMercadoPagoWorks();
         when(challengePurchases.hasMonthAvailable("542211234567")).thenReturn(true);
 
-        service.start(command().extras(List.of("juegos")).phone("221 123-4567").expectedTotal("30000").build());
+        service.start(command().extras(List.of("juegos")).phone("221 123-4567").expectedTotal("35000").build());
 
         PackOrder order = firstSavedOrder();
         assertThat(order.isWithGames()).isTrue();
-        assertThat(order.getGamesAmount()).isEqualByComparingTo("10000");
-        assertThat(order.getTotalAmount()).isEqualByComparingTo("30000");
+        assertThat(order.getPackAmount()).isEqualByComparingTo("20000");
+        assertThat(order.getGamesAmount()).isEqualByComparingTo("15000");
+        assertThat(order.getTotalAmount()).isEqualByComparingTo("35000");
         assertThat(order.getPhone()).isEqualTo("542211234567");
-        assertThat(capturedSpec().lines()).extracting("id").containsExactly("cuadernos", "juegos");
+        CheckoutPreferenceSpec spec = capturedSpec();
+        assertThat(spec.lines()).extracting("id").containsExactly("cuadernos", "juegos");
+        assertThat(spec.lines().get(1).unitPrice()).isEqualByComparingTo("15000");
+        assertThat(spec.lines().get(1).description()).contains("primer mes").contains("sin renovación automática");
+    }
+
+    @Test
+    void start_theGamesOfferIsExactlyOneMonth_theOldGamesTotalIsNoLongerAccepted() {
+        assertThatThrownBy(() -> service.start(command().extras(List.of("juegos")).phone("221 123-4567")
+                .expectedTotal("30000").build()))
+                .isInstanceOfSatisfying(PackCheckoutException.class, e -> assertThat(e.error()).isEqualTo(PackCheckoutError.PRECIO));
+
+        verify(orders, never()).save(any());
+    }
+
+    @Test
+    void start_thePacksGamesLineKeepsItsPriceAndWording() throws Exception {
+        properties.setSalesEnabled(true);
+        givenMercadoPagoWorks();
+        when(challengePurchases.hasMonthAvailable(any())).thenReturn(true);
+
+        service.start(command().edition("familias").extras(List.of("juegos")).phone("221 123-4567").build());
+
+        CheckoutPreferenceSpec spec = capturedSpec();
+        assertThat(spec.lines().get(1).unitPrice()).isEqualByComparingTo("10000");
+        assertThat(spec.lines().get(1).description()).isEqualTo("Un mes del Desafío 30 días de TIAM Digital");
+        assertThat(firstSavedOrder().getTotalAmount()).isEqualByComparingTo("24990");
     }
 
     @Test

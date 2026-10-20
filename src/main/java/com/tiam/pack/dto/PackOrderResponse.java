@@ -1,5 +1,6 @@
 package com.tiam.pack.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -14,7 +15,7 @@ import java.util.List;
  *
  * @param status    PENDING | PAID | FAILED | REVIEW
  * @param firstName the buyer's first name, for the greeting
- * @param edition   "familias" | "profesionales"
+ * @param edition   "familias" | "profesionales" | "cuadernos"
  * @param items     the products bought, each with its downloadable files
  * @param games     the bundled Desafío month, or null if the buyer did not buy it
  * @param expiresAt when the downloads stop working
@@ -55,7 +56,33 @@ public record PackOrderResponse(
     public record FileInfo(String key, String label, String paper, int sizeMb) {
     }
 
-    /** @param link the buyer's personal Desafío link, or null if it could not be produced (use WhatsApp) */
-    public record Games(String link) {
+    /**
+     * The bundled Desafío month.
+     *
+     * <p>The last four fields exist only for the Cuadernos offer (ONE month, no renewal) and are OMITTED from the
+     * JSON otherwise, so the Pack's response is exactly what it always was.
+     *
+     * @param link                     the buyer's personal Desafío link, or null if it could not be produced (use WhatsApp)
+     * @param monthsIncluded           how many Desafío months the purchase includes (1)
+     * @param startsVia                how the Desafío starts: "whatsapp" (the buyer writes from the number left at checkout)
+     * @param nextMonthsPaidSeparately true: the following months are optional and paid on the Desafío's own page
+     * @param nextMonthPriceArs        the normal price of one of those following months, in ARS
+     */
+    public record Games(
+            String link,
+            @JsonInclude(JsonInclude.Include.NON_NULL) Integer monthsIncluded,
+            @JsonInclude(JsonInclude.Include.NON_NULL) String startsVia,
+            @JsonInclude(JsonInclude.Include.NON_NULL) Boolean nextMonthsPaidSeparately,
+            @JsonInclude(JsonInclude.Include.NON_NULL) Integer nextMonthPriceArs) {
+
+        /** The Pack's add-on: just the link. */
+        public Games(String link) {
+            this(link, null, null, null, null);
+        }
+
+        /** The Cuadernos offer: the first Desafío month, started by WhatsApp; the next ones are paid apart at the normal price. */
+        public static Games firstMonthOffer(String link, BigDecimal normalMonthPriceArs) {
+            return new Games(link, 1, "whatsapp", true, normalMonthPriceArs.intValueExact());
+        }
     }
 }

@@ -17,7 +17,7 @@ class CuadernosPricingTest {
 
     @BeforeEach
     void setUp() {
-        properties = new PackProperties(); // defaults: cuadernos 20000, games 10000
+        properties = new PackProperties(); // defaults: cuadernos 20000 (+15000 first Desafío month); Pack games 10000
         pricing = new PackPricing(properties);
     }
 
@@ -32,8 +32,17 @@ class CuadernosPricingTest {
     }
 
     @Test
-    void withTheGamesMonth_addsTheSameGamesPriceThePackUses() {
-        properties.setGamesPriceArs(new BigDecimal("12500"));
+    void withTheGamesMonth_addsTheCuadernosOfferPriceForTheFirstMonth() {
+        PackPrice price = pricing.calculate(PackEdition.CUADERNOS, new PackExtras(true, false));
+
+        assertThat(price.games()).isEqualByComparingTo("15000");
+        assertThat(price.total()).isEqualByComparingTo("35000");
+    }
+
+    @Test
+    void theGamesOfferPriceComesFromItsOwnSetting_notFromThePacksGamesPrice() {
+        properties.setGamesPriceArs(new BigDecimal("1")); // the Pack's add-on price must be irrelevant here
+        properties.getCuadernos().setGamesPriceArs(new BigDecimal("12500"));
 
         PackPrice price = pricing.calculate(PackEdition.CUADERNOS, new PackExtras(true, false));
 
@@ -42,11 +51,30 @@ class CuadernosPricingTest {
     }
 
     @Test
-    void defaultGamesPrice_isTenThousand() {
-        PackPrice price = pricing.calculate(PackEdition.CUADERNOS, new PackExtras(true, false));
+    void thePacksGamesPrice_isUnchanged_whateverTheCuadernosOfferCosts() {
+        properties.getCuadernos().setGamesPriceArs(new BigDecimal("999"));
 
-        assertThat(price.games()).isEqualByComparingTo("10000");
-        assertThat(price.total()).isEqualByComparingTo("30000");
+        for (PackEdition edition : PackEdition.packEditions()) {
+            PackPrice price = pricing.calculate(edition, new PackExtras(true, false));
+            assertThat(price.games()).isEqualByComparingTo("10000");
+            assertThat(price.total()).isEqualByComparingTo("24990");
+        }
+    }
+
+    @Test
+    void aNegativeGamesOfferPrice_isAMisconfigurationAndNeverSells() {
+        properties.getCuadernos().setGamesPriceArs(new BigDecimal("-1"));
+
+        assertThatThrownBy(() -> pricing.calculate(PackEdition.CUADERNOS, new PackExtras(true, false)))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("CUADERNOS_GAMES_PRICE_ARS");
+    }
+
+    @Test
+    void theGamesOfferPrice_isIgnoredWhenTheBuyerDidNotAddTheGames() {
+        properties.getCuadernos().setGamesPriceArs(new BigDecimal("-1")); // would fail if it were read
+
+        assertThat(pricing.calculate(PackEdition.CUADERNOS, new PackExtras(false, false)).total())
+                .isEqualByComparingTo("20000");
     }
 
     @Test
