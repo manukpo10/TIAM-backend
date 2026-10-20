@@ -206,9 +206,10 @@ class PackAccessEmailComposerTest {
 
         assertThat(linked.html()).contains("Abrir mi mes de juegos").contains("Escribir por WhatsApp")
                 .contains("mismo número que dejaste al comprar");
+        // the Desafío's clock runs from the purchase, so nothing here is "activated" by a WhatsApp message any more
         assertThat(unlinked.html()).doesNotContain("Abrir mi mes de juegos").contains("Escribir por WhatsApp")
-                .contains("Para activarlo, escribinos por WhatsApp");
-        assertThat(unlinked.text()).contains("Para activarlo, escribinos por WhatsApp");
+                .contains("Para empezar, escribinos por WhatsApp");
+        assertThat(unlinked.text()).contains("Para empezar, escribinos por WhatsApp");
     }
 
     @Test

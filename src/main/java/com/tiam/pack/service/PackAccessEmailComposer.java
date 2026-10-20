@@ -82,7 +82,7 @@ public class PackAccessEmailComposer {
         }
     }
 
-    private static final String WHATSAPP_GAMES_TEXT = "Hola, compré el Pack TIAM con el mes de juegos y quiero activarlo.";
+    private static final String WHATSAPP_GAMES_TEXT = "Hola, compré el Pack TIAM con el mes de juegos y quiero empezar.";
     private static final String WHATSAPP_GAMES_TEXT_CUADERNOS =
             "Hola, compré los Cuadernos TIAM con el mes del Desafío y quiero empezar.";
     private static final String WHATSAPP_HELP_TEXT = "Hola, necesito ayuda con mi Pack TIAM.";
@@ -231,7 +231,8 @@ public class PackAccessEmailComposer {
                     sizeMb(edition, "extra-a4") + " MB", ""));
         }
         if (desafio != null) {
-            rows.append(PackEmailHtml.fileRow(PURPLE, "Tu mes de juegos", "Desafío de 30 días · 7 ejercicios nuevos por semana", "",
+            rows.append(PackEmailHtml.fileRow(PURPLE, "Tu mes de juegos",
+                    "Desafío de 30 días · corre desde la compra · 7 ejercicios nuevos por semana", "",
                     gamesSteps(desafio.url(), activationUrl(order))));
         }
         rows.append(PackEmailHtml.panelNote("Cada archivo viene en <strong>A4 y en Carta</strong>: elegí el de tu impresora "
@@ -267,16 +268,21 @@ public class PackAccessEmailComposer {
                 .filter(file -> file.code().endsWith("-a4")).toList();
     }
 
-    /** The Pack's games month: open it with the personal link when there is one, and how to activate it by WhatsApp. */
+    /**
+     * The Pack's games month. It runs 30 days from the PURCHASE (the Desafío's clock does not wait for a WhatsApp
+     * message): the buyer can start right away from the personal link, or by writing on WhatsApp when there is none.
+     */
     private static String gamesSteps(String gamesUrl, String activationUrl) {
         StringBuilder html = new StringBuilder("<div style=\"padding-top:10px;\">");
         if (gamesUrl != null) {
-            html.append(PackEmailHtml.muted("Ya está activo: entrá desde tu link personal."));
+            html.append(PackEmailHtml.muted("Tu mes de juegos ya está activo y corre 30 días desde la compra. "
+                    + "Podés empezar ahora mismo desde tu link personal."));
             html.append(PackEmailHtml.smallButton(gamesUrl, "Abrir mi mes de juegos", BLUE));
-            html.append(PackEmailHtml.muted("Para recibir los ejercicios por WhatsApp, escribinos desde el mismo número que dejaste al comprar."));
+            html.append(PackEmailHtml.muted("Si preferís recibir los ejercicios por WhatsApp, escribinos desde el mismo número "
+                    + "que dejaste al comprar."));
         } else {
-            html.append(PackEmailHtml.muted("Para activarlo, escribinos por WhatsApp desde el mismo número que dejaste al comprar: "
-                    + "te llega el primer ejercicio."));
+            html.append(PackEmailHtml.muted("Tu mes de juegos ya está incluido y corre 30 días desde la compra. "
+                    + "Para empezar, escribinos por WhatsApp desde el mismo número que dejaste al comprar."));
         }
         if (activationUrl != null) {
             html.append(PackEmailHtml.smallButton(activationUrl, "Escribir por WhatsApp", GREEN));
@@ -395,12 +401,12 @@ public class PackAccessEmailComposer {
     private static void appendGamesText(StringBuilder text, String gamesUrl, String activationUrl) {
         text.append("MES DE JUEGOS\n");
         if (gamesUrl != null) {
-            text.append("Tu mes de juegos del Desafío 30 días está activo. Entrá desde tu link personal:\n")
-                    .append(gamesUrl).append("\n");
-            text.append("Para recibir los ejercicios por WhatsApp, escribinos desde el mismo número que dejaste al comprar.\n");
+            text.append("Tu mes de juegos del Desafío 30 días está activo y corre 30 días desde la compra. "
+                    + "Podés empezar ahora mismo desde tu link personal:\n").append(gamesUrl).append("\n");
+            text.append("Si preferís recibir los ejercicios por WhatsApp, escribinos desde el mismo número que dejaste al comprar.\n");
         } else {
-            text.append("Tu mes de juegos del Desafío 30 días está incluido. Para activarlo, escribinos por "
-                    + "WhatsApp desde el mismo número que dejaste al comprar: te llega el primer ejercicio.\n");
+            text.append("Tu mes de juegos del Desafío 30 días está incluido y corre 30 días desde la compra. "
+                    + "Para empezar, escribinos por WhatsApp desde el mismo número que dejaste al comprar.\n");
         }
         if (activationUrl != null) {
             text.append("WhatsApp: ").append(activationUrl).append("\n");
@@ -571,9 +577,10 @@ public class PackAccessEmailComposer {
             text.append(".\n");
             if (order.hasDesafioMonth()) {
                 String gamesUrl = usableGamesLink(entry.gamesLink());
+                text.append("Tu mes de juegos del Desafío 30 días corre 30 días desde la compra.\n");
                 text.append(gamesUrl != null
-                        ? "Tu mes de juegos del Desafío 30 días: " + gamesUrl + "\n"
-                        : "Tu mes de juegos del Desafío 30 días está incluido: escribinos por WhatsApp para activarlo.\n");
+                        ? "Podés empezar ahora mismo desde tu link personal: " + gamesUrl + "\n"
+                        : "Para empezar, escribinos por WhatsApp desde el mismo número que dejaste al comprar.\n");
                 String activation = activationUrl(order);
                 if (activation != null) {
                     text.append("WhatsApp: ").append(activation).append("\n");
