@@ -22,12 +22,16 @@ public class PackRedirects {
 
     private final PackProperties properties;
 
-    /** {@code <landing>/pack/<edition>[?error=<code>]#comprar}, falling back to the families landing. */
+    /**
+     * {@code <landing>/pack/<edition>[?error=<code>]#comprar}, falling back to the families landing. The Cuadernos
+     * have a top-level page of their own: {@code <landing>/cuadernos[?error=<code>]#comprar}.
+     */
     public String landing(String editionSlug, PackCheckoutError error) {
         PackEdition edition = PackEdition.fromSlug(editionSlug).orElse(DEFAULT_EDITION);
         String base = stripTrailingSlashes(properties.getLandingBaseUrl());
         String query = error == null ? "" : "?error=" + error.code();
-        return base + "/pack/" + edition.slug() + query + "#comprar";
+        String path = edition.isCuadernos() ? "/cuadernos" : "/pack/" + edition.slug();
+        return base + path + query + "#comprar";
     }
 
     /** True only for https URLs on a Mercado Pago / Mercado Libre domain (production and sandbox checkouts). */

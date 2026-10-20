@@ -84,7 +84,13 @@ public class PackCheckoutService {
 
     /** @return the Mercado Pago URL to send the buyer to */
     public String start(CheckoutCommand command) {
-        if (!properties.isSalesEnabled()) {
+        Optional<PackEdition> requested = PackEdition.fromSlug(command.edition());
+        // Each product has its own switch. Anything that is not the Cuadernos (including an unknown edition) is
+        // gated by the Pack's, exactly as before the Cuadernos existed.
+        boolean salesOpen = requested.filter(PackEdition::isCuadernos).isPresent()
+                ? properties.getCuadernos().isSalesEnabled()
+                : properties.isSalesEnabled();
+        if (!salesOpen) {
             throw new PackCheckoutException(PackCheckoutError.CERRADO);
         }
         // Fail closed: a sale that cannot be fulfilled (local file store, no real email, localhost URLs, nobody to
@@ -97,9 +103,9 @@ public class PackCheckoutService {
 
         String email = normalizeEmail(command.email());
         String name = normalizeName(command.name());
-        PackEdition edition = PackEdition.fromSlug(command.edition())
-                .orElseThrow(() -> new PackCheckoutException(PackCheckoutError.EDICION));
+        PackEdition edition = requested.orElseThrow(() -> new PackCheckoutException(PackCheckoutError.EDICION));
         PackExtras extras = PackPricing.parseExtras(command.extras());
+        PackPricing.rejectUnsupportedExtras(edition, extras); // before the phone: the extra can never be bought here
         String phone = normalizePhone(command.phone(), extras.games());
         PackPrice price = pricing.calculate(edition, extras);
         checkExpectedTotal(command.expectedTotal(), price);
@@ -180,8 +186,13 @@ public class PackCheckoutService {
 
     private CheckoutPreferenceSpec preferenceSpec(PackOrder order, PackEdition edition, PackExtras extras, PackPrice price) {
         List<CheckoutLine> lines = new ArrayList<>();
-        lines.add(new CheckoutLine("pack-" + edition.slug(), "Pack TIAM - Edición " + edition.displayName(),
-                "Pack imprimible de estimulación cognitiva, Edición " + edition.displayName(), price.pack()));
+        if (edition.isCuadernos()) {
+            lines.add(new CheckoutLine("cuadernos", "Cuadernos TIAM - 120 ejercicios de estimulación cognitiva",
+                    "4 cuadernos imprimibles de estimulación cognitiva para hacer solo/a (PDF)", price.pack()));
+        } else {
+            lines.add(new CheckoutLine("pack-" + edition.slug(), "Pack TIAM - Edición " + edition.displayName(),
+                    "Pack imprimible de estimulación cognitiva, Edición " + edition.displayName(), price.pack()));
+        }
         if (extras.games()) {
             lines.add(new CheckoutLine("juegos", "Mes de juegos - Desafío 30 días TIAM",
                     "Un mes del Desafío 30 días de TIAM Digital", price.games()));

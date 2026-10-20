@@ -22,11 +22,28 @@ public class PackPricing {
 
     private final PackProperties properties;
 
+    /**
+     * The main product costs {@code PACK_PRICE_ARS} (the Pack, both editions) or {@code CUADERNOS_PRICE_ARS} (the
+     * Cuadernos). The Desafío month costs the same for both ({@code PACK_GAMES_PRICE_ARS}).
+     */
     public PackPrice calculate(PackEdition edition, PackExtras extras) {
-        BigDecimal pack = money(properties.getPriceArs(), "PACK_PRICE_ARS", true);
+        rejectUnsupportedExtras(edition, extras);
+        BigDecimal pack = edition.isCuadernos()
+                ? money(properties.getCuadernos().getPriceArs(), "CUADERNOS_PRICE_ARS", true)
+                : money(properties.getPriceArs(), "PACK_PRICE_ARS", true);
         BigDecimal games = extras.games() ? money(properties.getGamesPriceArs(), "PACK_GAMES_PRICE_ARS", false) : zero();
         BigDecimal extra = extras.extra() ? money(properties.getExtraPriceArs(), "PACK_EXTRA_PRICE_ARS", false) : zero();
         return new PackPrice(pack, games, extra, pack.add(games).add(extra));
+    }
+
+    /**
+     * The extra booklet belongs to the Pack only: asking for it with the Cuadernos fails the whole checkout with
+     * the same {@code extras} error as an unknown add-on (never silently dropped, never silently charged).
+     */
+    public static void rejectUnsupportedExtras(PackEdition edition, PackExtras extras) {
+        if (edition.isCuadernos() && extras.extra()) {
+            throw new PackCheckoutException(PackCheckoutError.EXTRAS, "the extra booklet does not apply to the Cuadernos");
+        }
     }
 
     /**
