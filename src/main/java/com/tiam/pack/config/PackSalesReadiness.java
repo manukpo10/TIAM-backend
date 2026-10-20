@@ -10,7 +10,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 /**
- * The fail-closed gate in front of the checkout. Sales may be switched on ({@code PACK_SALES_ENABLED=true}), but a
+ * The fail-closed gate in front of the checkout. Sales may be switched on ({@code PACK_SALES_ENABLED=true} for the Pack,
+ * {@code CUADERNOS_SALES_ENABLED=true} for the Cuadernos; the gate is the same for both), but a
  * checkout only starts when a buyer who pays will really get what they paid for:
  * <ul>
  *   <li>the private file store is the real remote one (R2), not the development folder whose links point at
