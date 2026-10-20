@@ -12,6 +12,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.regex.Pattern;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.env.Environment;
@@ -52,6 +54,8 @@ public class PackSalesReadiness {
     /** A gap is rechecked sooner, so uploading the missing file reopens sales without a restart. */
     static final Duration GAP_TTL = Duration.ofSeconds(30);
     private static final int KEYS_SHOWN = 3;
+    /** {@code v1}, {@code 2026-10}: what fits {@code pack_orders.catalog_version} (20) and can be a folder name. */
+    private static final Pattern CATALOG_VERSION = Pattern.compile("[A-Za-z0-9._-]{1,20}");
 
     private final PackProperties properties;
     private final PrivateFileStore store;
@@ -64,6 +68,8 @@ public class PackSalesReadiness {
     }
 
     private final Map<String, CatalogCheck> catalogChecks = new ConcurrentHashMap<>();
+    /** One lock per product (and version): only one refresh of its answer about R2 runs at a time. */
+    private final Map<String, ReentrantLock> refreshLocks = new ConcurrentHashMap<>();
 
     public PackSalesReadiness(PackProperties properties, PrivateFileStore store, EmailSender emailSender,
             Environment environment) {
@@ -112,7 +118,10 @@ public class PackSalesReadiness {
      */
     public List<String> productProblems(PackEdition edition) {
         List<String> problems = new ArrayList<>(priceProblems(edition));
-        if (!devModeActive() && store.isRemote()) {
+        List<String> versionProblems = versionProblems(edition);
+        problems.addAll(versionProblems);
+        // With a bad catalog version the storage keys are meaningless: do not even ask R2 about them.
+        if (versionProblems.isEmpty() && !devModeActive() && store.isRemote()) {
             problems.addAll(fileProblems(edition));
         }
         return problems;
@@ -166,36 +175,105 @@ public class PackSalesReadiness {
         }
     }
 
-    // ---- files in R2 ---------------------------------------------------------------------------------------------
+    // ---- catalog version -----------------------------------------------------------------------------------------
 
-    private List<String> fileProblems(PackEdition edition) {
-        String version = edition.isCuadernos() ? properties.getCuadernos().getCatalogVersion() : properties.getCatalogVersion();
-        String cacheKey = edition.slug() + "/" + version;
-        Instant now = clock.instant();
-        CatalogCheck cached = catalogChecks.get(cacheKey);
-        if (cached == null || !now.isBefore(cached.validUntil())) {
-            cached = checkCatalog(edition, version, now);
-            catalogChecks.put(cacheKey, cached);
-        }
-        if (cached.missing().isEmpty()) {
-            return List.of();
-        }
-        String shown = String.join(", ", cached.missing().stream().limit(KEYS_SHOWN).toList())
-                + (cached.missing().size() > KEYS_SHOWN ? ", ..." : "");
-        return List.of(edition.productName() + ": " + cached.missing().size() + " of " + cached.total()
-                + " files are not in R2 (" + shown + "): upload them to the bucket before selling it");
+    private String catalogVersionOf(PackEdition edition) {
+        return edition.isCuadernos() ? properties.getCuadernos().getCatalogVersion() : properties.getCatalogVersion();
     }
 
-    private CatalogCheck checkCatalog(PackEdition edition, String version, Instant now) {
+    /**
+     * The catalog version is the {@code v1} in {@code packs/v1/cuadernos/...}. Blank (an environment variable set to
+     * nothing) it would build {@code packs//cuadernos/...}; with a slash or a dot-dot it could leave its folder; and it
+     * must fit {@code pack_orders.catalog_version} (20 characters). Any of those closes the product, with a clear log.
+     */
+    private List<String> versionProblems(PackEdition edition) {
+        String variable = edition.isCuadernos() ? "CUADERNOS_CATALOG_VERSION" : "PACK_CATALOG_VERSION";
+        String version = catalogVersionOf(edition);
+        if (version != null && CATALOG_VERSION.matcher(version).matches()) {
+            return List.of();
+        }
+        String shown = version == null ? "not set" : "\"" + version.replaceAll("[^\\x20-\\x7E]", "?") + "\"";
+        // Not logged here: the checkout and the startup check log what this returns (once per checkout, once at boot).
+        return List.of(variable + " is " + shown + " (it must be a simple name such as v1: up to 20 letters, digits, "
+                + "dots, dashes or underscores): the storage keys would be wrong - " + edition.productName()
+                + " stays closed");
+    }
+
+    // ---- files in R2 ---------------------------------------------------------------------------------------------
+
+    /**
+     * What R2 says about this product's files, cached. Only ONE refresh runs at a time per product (single-flight):
+     * when the answer has expired, the first request refreshes it and the others keep using the last known answer
+     * instead of each running up to ten sequential HEADs. The very first check has no answer to fall back on, so there
+     * the others wait for that same single refresh.
+     */
+    private List<String> fileProblems(PackEdition edition) {
+        String version = catalogVersionOf(edition);
+        String cacheKey = edition.slug() + "/" + version;
+        CatalogCheck cached = catalogChecks.get(cacheKey);
+        if (cached != null && isFresh(cached)) {
+            return describe(edition, cached);
+        }
+        ReentrantLock lock = refreshLocks.computeIfAbsent(cacheKey, key -> new ReentrantLock());
+        if (cached == null) {
+            lock.lock(); // nothing to fall back on: wait for the one refresh
+            try {
+                CatalogCheck latest = catalogChecks.get(cacheKey); // somebody may have just finished it
+                return describe(edition, latest != null ? latest : refresh(edition, version, cacheKey));
+            } finally {
+                lock.unlock();
+            }
+        }
+        if (lock.tryLock()) {
+            try {
+                CatalogCheck latest = catalogChecks.get(cacheKey);
+                return describe(edition, latest != cached && latest != null && isFresh(latest)
+                        ? latest : refresh(edition, version, cacheKey));
+            } finally {
+                lock.unlock();
+            }
+        }
+        return describe(edition, cached); // another request is refreshing: use the last known answer meanwhile
+    }
+
+    private boolean isFresh(CatalogCheck check) {
+        return clock.instant().isBefore(check.validUntil());
+    }
+
+    private CatalogCheck refresh(PackEdition edition, String version, String cacheKey) {
+        CatalogCheck fresh = checkCatalog(edition, version);
+        catalogChecks.put(cacheKey, fresh);
+        return fresh;
+    }
+
+    private static List<String> describe(PackEdition edition, CatalogCheck check) {
+        if (check.missing().isEmpty()) {
+            return List.of();
+        }
+        String shown = String.join(", ", check.missing().stream().limit(KEYS_SHOWN).toList())
+                + (check.missing().size() > KEYS_SHOWN ? ", ..." : "");
+        return List.of(edition.productName() + ": " + check.missing().size() + " of " + check.total()
+                + " files are not in R2, or R2 could not be checked (" + shown + "): upload them to the bucket before selling it");
+    }
+
+    /** Asks R2 and never throws: a store that fails leaves the product closed (every file unverified) for a short while. */
+    private CatalogCheck checkCatalog(PackEdition edition, String version) {
         List<String> keys = PackCatalog.filesFor(edition, true).stream()
                 .map(file -> file.storageKey(version, edition)).toList();
-        List<String> missing = store.missingKeys(keys);
+        List<String> missing;
+        try {
+            missing = store.missingKeys(keys);
+        } catch (RuntimeException e) {
+            log.error("{} sales stay closed: R2 could not be checked ({}: {})", edition.productName(),
+                    e.getClass().getSimpleName(), e.getMessage());
+            return new CatalogCheck(List.copyOf(keys), keys.size(), clock.instant().plus(GAP_TTL));
+        }
         if (missing.isEmpty()) {
-            return new CatalogCheck(List.of(), keys.size(), now.plus(COMPLETE_CATALOG_TTL));
+            return new CatalogCheck(List.of(), keys.size(), clock.instant().plus(COMPLETE_CATALOG_TTL));
         }
         log.error("{} sales stay closed: {} of {} catalog files are not in R2 (or R2 could not be checked): {}",
                 edition.productName(), missing.size(), keys.size(), missing);
-        return new CatalogCheck(List.copyOf(missing), keys.size(), now.plus(GAP_TTL));
+        return new CatalogCheck(List.copyOf(missing), keys.size(), clock.instant().plus(GAP_TTL));
     }
 
     private static void requirePublicHttps(List<String> problems, String variable, String value) {

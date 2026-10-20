@@ -15,9 +15,10 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Collection;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.env.MockEnvironment;
@@ -30,9 +31,13 @@ class PackSalesReadinessProductTest {
 
     /** A remote store whose contents the test controls and whose questions it counts. */
     static final class FakeStore implements PrivateFileStore {
-        final Set<String> existing = new HashSet<>();
-        boolean remote = true;
-        int asked;
+        final Set<String> existing = ConcurrentHashMap.newKeySet();
+        volatile boolean remote = true;
+        volatile int asked;
+        /** Runs when R2 is asked, before it answers: lets a test hold a "slow" R2 open. */
+        volatile Consumer<Collection<String>> beforeAnswer;
+        /** When set, R2 blows up instead of answering. */
+        volatile RuntimeException failure;
 
         @Override
         public String signedDownloadUrl(String key, Duration ttl, String downloadFilename) {
@@ -46,7 +51,17 @@ class PackSalesReadinessProductTest {
 
         @Override
         public List<String> missingKeys(Collection<String> keys) {
-            asked++;
+            synchronized (this) {
+                asked++;
+            }
+            Consumer<Collection<String>> hook = beforeAnswer;
+            if (hook != null) {
+                hook.accept(keys);
+            }
+            RuntimeException boom = failure;
+            if (boom != null) {
+                throw boom;
+            }
             return keys.stream().filter(key -> !existing.contains(key)).toList();
         }
 
@@ -156,6 +171,81 @@ class PackSalesReadinessProductTest {
 
         assertThat(readiness().productProblems(PackEdition.CUADERNOS)).isEmpty();
         assertThat(store.asked).isZero();
+    }
+
+    // --- a blank or invalid catalog version must close the product, never crash the boot ------------------------------
+
+    @Test
+    void aBlankCuadernosCatalogVersion_closesTheCuadernos_namingTheVariable_withoutAskingTheStore() {
+        for (String blank : new String[] {"", "   ", null}) {
+            properties.getCuadernos().setCatalogVersion(blank);
+
+            List<String> problems = readiness().productProblems(PackEdition.CUADERNOS);
+
+            assertThat(problems).as("version %s", blank).hasSize(1);
+            assertThat(problems.get(0)).contains("CUADERNOS_CATALOG_VERSION").contains("Cuadernos TIAM").contains("closed");
+        }
+        assertThat(store.asked).isZero();
+    }
+
+    @Test
+    void aBlankPackCatalogVersion_closesTheTwoPackEditions_butNotTheCuadernos() {
+        properties.setCatalogVersion("");
+        PackSalesReadiness readiness = readiness();
+
+        for (PackEdition edition : PackEdition.packEditions()) {
+            assertThat(readiness.productProblems(edition)).as("%s", edition).hasSize(1)
+                    .first().asString().contains("PACK_CATALOG_VERSION").contains(edition.productName());
+        }
+        assertThat(readiness.productProblems(PackEdition.CUADERNOS)).isEmpty();
+    }
+
+    @Test
+    void aVersionThatCouldNotBeAStorageFolderOrDoesNotFitTheColumn_isRejected() {
+        for (String bad : new String[] {"../v1", "v1/x", "v 1", "v1\n", "v".repeat(21), "/v1", "v1/"}) {
+            properties.getCuadernos().setCatalogVersion(bad);
+
+            assertThat(readiness().productProblems(PackEdition.CUADERNOS)).as("version [%s]", bad)
+                    .anyMatch(p -> p.contains("CUADERNOS_CATALOG_VERSION"));
+        }
+        assertThat(store.asked).isZero();
+    }
+
+    @Test
+    void ordinaryVersionNames_areAccepted() {
+        for (String good : new String[] {"v1", "v2", "v10", "2026-10", "v1.1", "r_3"}) {
+            properties.getCuadernos().setCatalogVersion(good);
+            store.upload(PackEdition.CUADERNOS, good);
+
+            assertThat(readiness().productProblems(PackEdition.CUADERNOS)).as("version %s", good).isEmpty();
+        }
+    }
+
+    @Test
+    void theVersionRuleAppliesInDevModeToo_becauseItBreaksTheStorageKeysEverywhere() {
+        properties.setDevMode(true);
+        properties.getCuadernos().setCatalogVersion("");
+
+        assertThat(readiness().productProblems(PackEdition.CUADERNOS)).anyMatch(p -> p.contains("CUADERNOS_CATALOG_VERSION"));
+    }
+
+    @Test
+    void aStoreThatThrows_closesTheProduct_insteadOfPropagating_andRecoversWhenItWorksAgain() {
+        PackSalesReadiness readiness = readiness();
+        store.failure = new IllegalStateException("boom");
+
+        List<String> problems;
+        try (LogCapture logs = new LogCapture(PackSalesReadiness.class)) {
+            problems = readiness.productProblems(PackEdition.CUADERNOS); // must not throw
+
+            assertThat(logs.messages(Level.ERROR)).anyMatch(m -> m.contains("Cuadernos TIAM") && m.contains("IllegalStateException"));
+        }
+        assertThat(problems).hasSize(1);
+        assertThat(problems.get(0)).contains("Cuadernos TIAM").contains("R2");
+
+        store.failure = null;
+        clock.advance(Duration.ofSeconds(31));
+        assertThat(readiness.productProblems(PackEdition.CUADERNOS)).isEmpty();
     }
 
     // --- caching and logging -----------------------------------------------------------------------------------------

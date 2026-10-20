@@ -216,6 +216,45 @@ class CuadernosStartupCheckTest {
         }
     }
 
+    // --- the startup check must NEVER stop the boot (it runs on ApplicationReadyEvent, with no try/catch around it) -------
+
+    @Test
+    void aBlankCatalogVersion_doesNotStopTheBoot_andIsLoggedClearly() {
+        properties.getCuadernos().setCatalogVersion("");
+        properties.setSalesEnabled(true);
+        properties.setCatalogVersion("  ");
+
+        try (LogCapture logs = new LogCapture(PackStartupCheck.class)) {
+            check().verify(); // must not throw
+
+            assertThat(logs.messages(Level.ERROR)).anyMatch(m -> m.contains("CUADERNOS_CATALOG_VERSION") && m.contains("Cuadernos TIAM"));
+            assertThat(logs.messages(Level.ERROR)).anyMatch(m -> m.contains("PACK_CATALOG_VERSION") && m.contains("Pack Básico"));
+        }
+    }
+
+    @Test
+    void aStoreThatThrows_doesNotStopTheBoot() {
+        when(store.missingKeys(org.mockito.ArgumentMatchers.anyCollection()))
+                .thenThrow(new IllegalArgumentException("Storage key is not allowed"));
+
+        try (LogCapture logs = new LogCapture(PackStartupCheck.class)) {
+            check().verify(); // must not throw
+        }
+    }
+
+    @Test
+    void aCheckThatBlowsUpForAnyReason_isLogged_andNeverEscapes() {
+        PackSalesReadiness broken = mock(PackSalesReadiness.class);
+        when(broken.productProblems(org.mockito.ArgumentMatchers.any())).thenThrow(new IllegalStateException("boom"));
+        PackStartupCheck check = new PackStartupCheck(properties, plans, mercadoPago, broken);
+
+        try (LogCapture logs = new LogCapture(PackStartupCheck.class)) {
+            check.verify(); // must not throw
+
+            assertThat(logs.messages(Level.ERROR)).anyMatch(m -> m.contains("startup check") && m.contains("IllegalStateException"));
+        }
+    }
+
     @Test
     void theCuadernosPrices_areNotCheckedWhileTheyAreNotForSale() {
         properties.getCuadernos().setSalesEnabled(false);

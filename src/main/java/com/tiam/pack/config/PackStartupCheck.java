@@ -30,8 +30,22 @@ public class PackStartupCheck {
     private final MercadoPagoProperties mercadoPago;
     private final PackSalesReadiness readiness;
 
+    /**
+     * Runs once the application is ready. It only REPORTS: whatever goes wrong inside it (a store that throws, a blank
+     * setting) is logged and swallowed, because an exception out of an {@code ApplicationReadyEvent} listener aborts the
+     * boot and would take the Desafío down with the shop.
+     */
     @EventListener(ApplicationReadyEvent.class)
     public void verify() {
+        try {
+            check();
+        } catch (RuntimeException e) {
+            log.error("Pack startup check failed unexpectedly ({}: {}); it only reports and never stops the boot, "
+                    + "so review the PACK_* / CUADERNOS_* settings by hand.", e.getClass().getSimpleName(), e.getMessage());
+        }
+    }
+
+    private void check() {
         if (readiness.devModeIgnored()) {
             log.error("PACK_DEV_MODE=true is set but the prod profile is active: it is IGNORED. "
                     + "Remove PACK_DEV_MODE from this environment.");

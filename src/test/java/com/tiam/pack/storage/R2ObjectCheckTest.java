@@ -133,14 +133,24 @@ class R2ObjectCheckTest {
     }
 
     @Test
-    void aKeyThatCouldEscapeItsPrefix_isRefused_andNothingIsProbed() {
+    void aKeyThatCouldEscapeItsPrefix_isNeverProbed_andIsReportedMissing_insteadOfThrowing() {
         R2PrivateFileStore store = store(url -> {
             probed.add(url);
             return 200;
         });
 
-        assertThatThrownBy(() -> store.missingKeys(List.of(KEY_1, "../secret"))).isInstanceOf(IllegalArgumentException.class);
-        assertThat(probed).isEmpty();
+        // a blank catalog version builds "packs//cuadernos/...": that must not blow up the caller (the boot check)
+        assertThat(store.missingKeys(List.of(KEY_1, "../secret", "packs//cuadernos/a4/cuaderno-1.pdf", "/abs", " ")))
+                .containsExactly("../secret", "packs//cuadernos/a4/cuaderno-1.pdf", "/abs", " ");
+        assertThat(probed).as("only the safe key reached R2").hasSize(1);
+    }
+
+    @Test
+    void aSignedUrlForAnUnsafeKey_isStillRefused() {
+        R2PrivateFileStore store = store(url -> 200);
+
+        assertThatThrownBy(() -> store.signedDownloadUrl("../secret", Duration.ofSeconds(300), "x.pdf"))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test

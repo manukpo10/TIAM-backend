@@ -79,12 +79,18 @@ public class R2PrivateFileStore implements PrivateFileStore {
      */
     @Override
     public List<String> missingKeys(Collection<String> keys) {
-        keys.forEach(StorageKeys::requireSafe);
         List<String> missing = new ArrayList<>();
         boolean stopped = false;
         for (String key : keys) {
             if (stopped) {
                 missing.add(key);
+                continue;
+            }
+            // A key that could not be a catalog object (e.g. "packs//cuadernos/..." from a blank catalog version) is
+            // never sent to R2 and never makes this check throw: it is simply not there.
+            if (!isSafe(key)) {
+                missing.add(key);
+                log.warn("R2 object key {} is not a valid storage key (check the catalog version settings)", key);
                 continue;
             }
             String url = presigner.presign("HEAD", "https", host, "/" + bucket + "/" + key, HEAD_URL_TTL, Map.of());
@@ -106,6 +112,15 @@ public class R2PrivateFileStore implements PrivateFileStore {
             }
         }
         return missing;
+    }
+
+    private static boolean isSafe(String key) {
+        try {
+            StorageKeys.requireSafe(key);
+            return true;
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
     }
 
     private static HeadProbe httpProbe() {
