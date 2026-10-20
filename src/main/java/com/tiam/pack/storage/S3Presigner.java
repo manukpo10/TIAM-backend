@@ -20,7 +20,7 @@ import javax.crypto.spec.SecretKeySpec;
  * do for us here is a handful of HMACs. Correctness is pinned by the worked example in the AWS
  * documentation (see S3PresignerTest).
  *
- * <p>Scope is deliberately narrow: GET, query-string authentication, only the {@code host} header
+ * <p>Scope is deliberately narrow: GET and HEAD, query-string authentication, only the {@code host} header
  * signed, {@code UNSIGNED-PAYLOAD}. Anything else (PUT, multipart, headers) is out of scope.
  */
 final class S3Presigner {
@@ -48,6 +48,15 @@ final class S3Presigner {
      * @param extraQuery    extra query parameters that must be signed (e.g. response-content-disposition)
      */
     String presignGet(String scheme, String host, String path, Duration expires, Map<String, String> extraQuery) {
+        return presign("GET", scheme, host, path, expires, extraQuery);
+    }
+
+    /**
+     * The same query-string authentication for another bodiless method ("GET" to download, "HEAD" to ask whether an
+     * object exists without reading it). The method is part of what is signed, so a URL is only good for the method it
+     * was made for.
+     */
+    String presign(String method, String scheme, String host, String path, Duration expires, Map<String, String> extraQuery) {
         long seconds = expires.getSeconds();
         if (seconds < 1 || seconds > MAX_EXPIRY_SECONDS) {
             throw new IllegalArgumentException("Expiry must be between 1 second and 7 days");
@@ -75,7 +84,7 @@ final class S3Presigner {
         });
 
         String canonicalUri = encodePath(path);
-        String canonicalRequest = "GET\n" + canonicalUri + "\n" + canonicalQuery + "\n"
+        String canonicalRequest = method + "\n" + canonicalUri + "\n" + canonicalQuery + "\n"
                 + "host:" + host + "\n\n" + "host\n" + "UNSIGNED-PAYLOAD";
         String stringToSign = ALGORITHM + "\n" + amzDate + "\n" + credentialScope + "\n" + sha256Hex(canonicalRequest);
 
