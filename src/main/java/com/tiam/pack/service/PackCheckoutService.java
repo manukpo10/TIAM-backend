@@ -25,6 +25,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
@@ -114,6 +115,7 @@ public class PackCheckoutService {
             Optional<PackOrder> reusable = orders.findReusable(email, edition, extras.games(), extras.extra(),
                     PackOrderStatus.PENDING, Instant.now().minus(REUSE_WINDOW)).stream()
                     .filter(candidate -> startedBy(candidate, command.clientIp()))
+                    .filter(candidate -> sameBuyerDetails(candidate, name, phone, extras.games()))
                     .findFirst();
             if (reusable.isPresent()) {
                 log.info("Pack checkout: reusing the open checkout of order id={}", reusable.get().getId());
@@ -213,6 +215,16 @@ public class PackCheckoutService {
     private String returnUrl(PackOrder order) {
         String base = properties.getThankyouUrl();
         return base + (base.contains("?") ? "&" : "?") + "o=" + order.getAccessToken();
+    }
+
+    /**
+     * A double click is the same purchase only if the buyer typed the same details: the name always, and the phone
+     * when the Desafío add-on is bought (it is the number the month is granted to). A different name or phone is a
+     * different purchase and must not be handed somebody else's order, token and Mercado Pago link.
+     */
+    private static boolean sameBuyerDetails(PackOrder candidate, String name, String phone, boolean withGames) {
+        return Objects.equals(candidate.getBuyerName(), name)
+                && (!withGames || Objects.equals(candidate.getPhone(), phone));
     }
 
     private boolean startedBy(PackOrder candidate, String clientIp) {
