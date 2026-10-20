@@ -99,8 +99,8 @@ public class PackProperties {
     public static class Cuadernos {
         /** Master switch for starting a Cuadernos checkout. Paid orders keep working when it is off. */
         private boolean salesEnabled = false;
-        /** Server-side price (provisional, set it with CUADERNOS_PRICE_ARS). */
-        private BigDecimal priceArs = new BigDecimal("14990");
+        /** Server-side price of the collection (ARS 20.000 at launch; override with CUADERNOS_PRICE_ARS). */
+        private BigDecimal priceArs = new BigDecimal("20000");
     }
 
     @Getter

@@ -76,8 +76,11 @@ public class PackDownloadService {
         requireOpenAccess(order);
 
         List<PackOrderResponse.Item> items = new ArrayList<>();
-        items.add(item(order, PackProduct.PACK, "PACK", "Pack imprimible - Edición " + order.getEdition().displayName()));
-        if (order.isWithExtra()) {
+        // The Cuadernos are one item with their own title (no Pack wording, no editions) and never have the extra booklet.
+        items.add(item(order, PackProduct.PACK, "PACK", order.getEdition().isCuadernos()
+                ? "Cuadernos TIAM"
+                : "Pack imprimible - Edición " + order.getEdition().displayName()));
+        if (order.isWithExtra() && !order.getEdition().isCuadernos()) {
             items.add(item(order, PackProduct.EXTRA, "EXTRA", "Cuadernillo extra"));
         }
         PackOrderResponse.Games games = order.isWithGames()

@@ -80,7 +80,7 @@ class CuadernosCheckoutControllerTest {
     void validForm_redirectsWith303ToTheMercadoPagoCheckout_andPassesTheEditionAlong() throws Exception {
         when(checkoutService.start(any())).thenReturn(MP);
 
-        mvc.perform(form().param("extras", "juegos").param("telefono", "221 123-4567").param("expected_total", "24990"))
+        mvc.perform(form().param("extras", "juegos").param("telefono", "221 123-4567").param("expected_total", "30000"))
                 .andExpect(status().isSeeOther()).andExpect(header().string("Location", MP))
                 .andExpect(header().string("Cache-Control", org.hamcrest.Matchers.containsString("no-store")));
 
@@ -88,7 +88,7 @@ class CuadernosCheckoutControllerTest {
         verify(checkoutService).start(captor.capture());
         assertThat(captor.getValue().edition()).isEqualTo("cuadernos");
         assertThat(captor.getValue().extras()).containsExactly("juegos");
-        assertThat(captor.getValue().expectedTotal()).isEqualTo("24990");
+        assertThat(captor.getValue().expectedTotal()).isEqualTo("30000");
     }
 
     @Test

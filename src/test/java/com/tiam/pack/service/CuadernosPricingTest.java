@@ -17,7 +17,7 @@ class CuadernosPricingTest {
 
     @BeforeEach
     void setUp() {
-        properties = new PackProperties(); // defaults: cuadernos 14990, games 10000
+        properties = new PackProperties(); // defaults: cuadernos 20000, games 10000
         pricing = new PackPricing(properties);
     }
 
@@ -25,10 +25,10 @@ class CuadernosPricingTest {
     void cuadernosOnly_chargesJustTheCuadernosPrice() {
         PackPrice price = pricing.calculate(PackEdition.CUADERNOS, new PackExtras(false, false));
 
-        assertThat(price.pack()).isEqualByComparingTo("14990");
+        assertThat(price.pack()).isEqualByComparingTo("20000");
         assertThat(price.games()).isEqualByComparingTo("0");
         assertThat(price.extra()).isEqualByComparingTo("0");
-        assertThat(price.total()).isEqualByComparingTo("14990");
+        assertThat(price.total()).isEqualByComparingTo("20000");
     }
 
     @Test
@@ -38,14 +38,15 @@ class CuadernosPricingTest {
         PackPrice price = pricing.calculate(PackEdition.CUADERNOS, new PackExtras(true, false));
 
         assertThat(price.games()).isEqualByComparingTo("12500");
-        assertThat(price.total()).isEqualByComparingTo("27490");
+        assertThat(price.total()).isEqualByComparingTo("32500");
     }
 
     @Test
     void defaultGamesPrice_isTenThousand() {
         PackPrice price = pricing.calculate(PackEdition.CUADERNOS, new PackExtras(true, false));
 
-        assertThat(price.total()).isEqualByComparingTo("24990");
+        assertThat(price.games()).isEqualByComparingTo("10000");
+        assertThat(price.total()).isEqualByComparingTo("30000");
     }
 
     @Test

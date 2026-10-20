@@ -68,10 +68,10 @@ class CuadernosCheckoutServiceTest {
         PackOrder order = firstSavedOrder();
         assertThat(order.getStatus()).isEqualTo(PackOrderStatus.PENDING);
         assertThat(order.getEdition()).isEqualTo(PackEdition.CUADERNOS);
-        assertThat(order.getPackAmount()).isEqualByComparingTo("14990");
+        assertThat(order.getPackAmount()).isEqualByComparingTo("20000");
         assertThat(order.getGamesAmount()).isEqualByComparingTo("0");
         assertThat(order.getExtraAmount()).isEqualByComparingTo("0");
-        assertThat(order.getTotalAmount()).isEqualByComparingTo("14990");
+        assertThat(order.getTotalAmount()).isEqualByComparingTo("20000");
         assertThat(order.isWithExtra()).isFalse();
         assertThat(order.getCurrency()).isEqualTo("ARS");
         assertThat(order.getCatalogVersion()).isEqualTo("v1");
@@ -97,7 +97,7 @@ class CuadernosCheckoutServiceTest {
         assertThat(spec.lines()).hasSize(1);
         assertThat(spec.lines()).extracting("id").containsExactly("cuadernos");
         assertThat(spec.lines().get(0).title()).contains("Cuadernos TIAM").doesNotContain("Pack").doesNotContain("Edición");
-        assertThat(spec.lines().get(0).unitPrice()).isEqualByComparingTo("14990");
+        assertThat(spec.lines().get(0).unitPrice()).isEqualByComparingTo("20000");
         assertThat(spec.externalReference()).isEqualTo("pack:42");
         assertThat(spec.backUrl()).isEqualTo("https://tiamdigital.com/pack/gracias?o=" + firstSavedOrder().getAccessToken());
         assertThat(spec.statementDescriptor()).isEqualTo("TIAM");
@@ -108,12 +108,12 @@ class CuadernosCheckoutServiceTest {
         givenMercadoPagoWorks();
         when(challengePurchases.hasMonthAvailable("542211234567")).thenReturn(true);
 
-        service.start(command().extras(List.of("juegos")).phone("221 123-4567").expectedTotal("24990").build());
+        service.start(command().extras(List.of("juegos")).phone("221 123-4567").expectedTotal("30000").build());
 
         PackOrder order = firstSavedOrder();
         assertThat(order.isWithGames()).isTrue();
         assertThat(order.getGamesAmount()).isEqualByComparingTo("10000");
-        assertThat(order.getTotalAmount()).isEqualByComparingTo("24990");
+        assertThat(order.getTotalAmount()).isEqualByComparingTo("30000");
         assertThat(order.getPhone()).isEqualTo("542211234567");
         assertThat(capturedSpec().lines()).extracting("id").containsExactly("cuadernos", "juegos");
     }
@@ -177,7 +177,7 @@ class CuadernosCheckoutServiceTest {
     void start_anExpectedTotalThatMatches_isAccepted() throws Exception {
         givenMercadoPagoWorks();
 
-        service.start(command().expectedTotal("14990,00").build());
+        service.start(command().expectedTotal("20000,00").build());
 
         verify(mercadoPago).createCheckoutPreference(any());
     }

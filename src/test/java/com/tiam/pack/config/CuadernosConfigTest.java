@@ -42,9 +42,15 @@ class CuadernosConfigTest {
     }
 
     @Test
-    void price_comesFromTheEnvironment_withTheProvisionalDefault() {
-        assertThat(yaml.getProperty("tiam.pack.cuadernos.price-ars")).isEqualTo("${CUADERNOS_PRICE_ARS:14990}");
-        assertThat(new PackProperties().getCuadernos().getPriceArs()).isEqualByComparingTo(new BigDecimal("14990"));
+    void price_comesFromTheEnvironment_withTheLaunchPriceAsDefault() {
+        assertThat(yaml.getProperty("tiam.pack.cuadernos.price-ars")).isEqualTo("${CUADERNOS_PRICE_ARS:20000}");
+        assertThat(new PackProperties().getCuadernos().getPriceArs()).isEqualByComparingTo(new BigDecimal("20000"));
+    }
+
+    @Test
+    void theGamesMonthKeepsItsOwnPrice_sharedWithThePack() {
+        assertThat(yaml.getProperty("tiam.pack.games-price-ars")).isEqualTo("${PACK_GAMES_PRICE_ARS:10000}");
+        assertThat(new PackProperties().getGamesPriceArs()).isEqualByComparingTo(new BigDecimal("10000"));
     }
 
     @Test
