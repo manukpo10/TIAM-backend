@@ -87,6 +87,40 @@ class CuadernosSalesReadinessTest {
     }
 
     @Test
+    void aCuadernosCheckout_withFilesMissingInR2_isRefusedAsClosed_whileThePackStaysOpen() throws Exception {
+        properties.setSalesEnabled(true);
+        // R2 has the Pack's files but one of the Cuadernos' is not uploaded yet
+        when(store.missingKeys(org.mockito.ArgumentMatchers.anyCollection())).thenAnswer(invocation -> {
+            java.util.Collection<String> keys = invocation.getArgument(0);
+            return keys.stream().filter(key -> key.endsWith("cuadernos/a4/cuaderno-2.pdf")).toList();
+        });
+        org.mockito.Mockito.when(mercadoPago.isConfigured()).thenReturn(true);
+        org.mockito.Mockito.when(orders.save(org.mockito.ArgumentMatchers.any(com.tiam.pack.domain.PackOrder.class)))
+                .thenAnswer(invocation -> {
+                    com.tiam.pack.domain.PackOrder order = invocation.getArgument(0);
+                    order.setId(42L);
+                    return order;
+                });
+        org.mockito.Mockito.when(mercadoPago.createCheckoutPreference(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new com.tiam.subscription.service.CreatedPreference("PREF",
+                        "https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=PREF"));
+        PackCheckoutService service = service();
+
+        assertThatThrownBy(() -> service.start(command("cuadernos")))
+                .isInstanceOfSatisfying(PackCheckoutException.class, e -> assertThat(e.error()).isEqualTo(PackCheckoutError.CERRADO));
+        verifyNoInteractions(mercadoPago);
+
+        assertThat(service.start(command("familias"))).contains("mercadopago.com.ar"); // the Pack is not affected
+    }
+
+    @Test
+    void aCuadernosCheckout_withAPriceBelowAThousand_isRefusedAsClosed() {
+        properties.getCuadernos().setPriceArs(new java.math.BigDecimal("20")); // "20.000" typed with a dot
+
+        assertClosed();
+    }
+
+    @Test
     void devMode_liftsTheRequirementsOutsideProduction_andNeverInProduction() {
         when(store.isRemote()).thenReturn(false);
         properties.setDevMode(true);
@@ -96,11 +130,19 @@ class CuadernosSalesReadinessTest {
         assertThat(readiness().problems()).isNotEmpty();
     }
 
-    private void assertClosed() {
-        PackCheckoutService service = new PackCheckoutService(orders, new PackPricing(properties), properties, mercadoPago,
+    private PackCheckoutService service() {
+        return new PackCheckoutService(orders, new PackPricing(properties), properties, mercadoPago,
                 challengePurchases, new PackRateLimiter(new MutableClock(Instant.parse("2026-10-14T12:00:00Z"))), readiness());
-        CheckoutCommand command = new CheckoutCommand("ana@example.com", "Ana Gómez", "cuadernos", List.of(), null, null,
+    }
+
+    private static CheckoutCommand command(String edition) {
+        return new CheckoutCommand("ana@example.com", "Ana Gómez", edition, List.of(), null, null,
                 null, null, null, null, "1.2.3.4");
+    }
+
+    private void assertClosed() {
+        PackCheckoutService service = service();
+        CheckoutCommand command = command("cuadernos");
 
         assertThatThrownBy(() -> service.start(command))
                 .isInstanceOfSatisfying(PackCheckoutException.class, e -> assertThat(e.error()).isEqualTo(PackCheckoutError.CERRADO));

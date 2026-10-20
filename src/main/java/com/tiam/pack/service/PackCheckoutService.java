@@ -101,6 +101,16 @@ public class PackCheckoutService {
             log.error("Pack checkout REFUSED (sales are enabled but the shop is not ready): {}", notReady);
             throw new PackCheckoutException(PackCheckoutError.CERRADO);
         }
+        // And the product being bought must itself be sellable: sane prices and every file of ITS catalog in R2. One
+        // product's gap never closes another (the answer about R2 is cached, so this is not a call per checkout).
+        if (requested.isPresent()) {
+            List<String> productNotReady = readiness.productProblems(requested.get());
+            if (!productNotReady.isEmpty()) {
+                log.error("Pack checkout REFUSED ({} is enabled but not ready): {}", requested.get().productName(),
+                        productNotReady);
+                throw new PackCheckoutException(PackCheckoutError.CERRADO);
+            }
+        }
 
         String email = normalizeEmail(command.email());
         String name = normalizeName(command.name());

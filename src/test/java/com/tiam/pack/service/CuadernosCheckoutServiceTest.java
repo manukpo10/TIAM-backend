@@ -301,6 +301,29 @@ class CuadernosCheckoutServiceTest {
     }
 
     @Test
+    void start_whenTheProductIsNotReady_isClosedBeforeAnythingIsTouched_andOnlyThatProductIsAsked() {
+        when(readiness.productProblems(PackEdition.CUADERNOS)).thenReturn(List.of("Cuadernos TIAM: 1 of 10 files are not in R2"));
+
+        assertThatThrownBy(() -> service.start(command().build()))
+                .isInstanceOfSatisfying(PackCheckoutException.class, e -> assertThat(e.error()).isEqualTo(PackCheckoutError.CERRADO));
+
+        verifyNoInteractions(orders, mercadoPago, challengePurchases);
+        verify(readiness, never()).productProblems(PackEdition.FAMILIAS);
+        verify(readiness, never()).productProblems(PackEdition.PROFESIONALES);
+    }
+
+    @Test
+    void start_aProductThatIsReady_proceeds_andThePackIsAskedAboutItsOwnEdition() throws Exception {
+        properties.setSalesEnabled(true);
+        givenMercadoPagoWorks();
+
+        service.start(command().edition("profesionales").build());
+
+        verify(readiness).productProblems(PackEdition.PROFESIONALES);
+        verify(readiness, never()).productProblems(PackEdition.CUADERNOS);
+    }
+
+    @Test
     void start_aMisconfiguredCuadernosPrice_neverCreatesAnOrder() {
         properties.getCuadernos().setPriceArs(java.math.BigDecimal.ZERO);
 

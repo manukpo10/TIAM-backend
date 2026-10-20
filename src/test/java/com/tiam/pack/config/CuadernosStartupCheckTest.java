@@ -170,6 +170,53 @@ class CuadernosStartupCheckTest {
     }
 
     @Test
+    void cuadernosOnWithAPriceTypedWithAThousandsDot_failsLoudly_andSaysHowToWriteIt() {
+        properties.getCuadernos().setPriceArs(new BigDecimal("20")); // "20.000" read as 20
+
+        try (LogCapture logs = new LogCapture(PackStartupCheck.class)) {
+            check().verify();
+
+            assertThat(logs.messages(Level.ERROR)).anyMatch(m -> m.contains("CUADERNOS_SALES_ENABLED=true")
+                    && m.contains("Cuadernos TIAM") && m.contains("CUADERNOS_PRICE_ARS") && m.contains("closed"));
+        }
+    }
+
+    @Test
+    void cuadernosOnWithFilesMissingInR2_failsLoudly_namingTheProductAndTheKeys() {
+        when(store.missingKeys(org.mockito.ArgumentMatchers.anyCollection())).thenAnswer(invocation -> {
+            java.util.Collection<String> keys = invocation.getArgument(0);
+            return keys.stream().filter(key -> key.contains("cuadernos/carta/")).toList();
+        });
+
+        try (LogCapture logs = new LogCapture(PackStartupCheck.class)) {
+            check().verify();
+
+            assertThat(logs.messages(Level.ERROR)).anyMatch(m -> m.contains("CUADERNOS_SALES_ENABLED=true")
+                    && m.contains("Cuadernos TIAM") && m.contains("5 of 10") && m.contains("packs/v1/cuadernos/carta/"));
+        }
+    }
+
+    @Test
+    void packOnWithFilesMissingInR2_failsLoudlyPerEdition_butNotWhileThePackIsOff() {
+        when(store.missingKeys(org.mockito.ArgumentMatchers.anyCollection())).thenAnswer(invocation -> {
+            java.util.Collection<String> keys = invocation.getArgument(0);
+            return keys.stream().filter(key -> key.contains("/profesionales/")).toList();
+        });
+        try (LogCapture logs = new LogCapture(PackStartupCheck.class)) {
+            check().verify(); // the Pack is off here
+            assertThat(logs.messages(Level.ERROR)).noneMatch(m -> m.contains("Pack Básico"));
+        }
+
+        properties.setSalesEnabled(true);
+        try (LogCapture logs = new LogCapture(PackStartupCheck.class)) {
+            check().verify();
+
+            assertThat(logs.messages(Level.ERROR)).anyMatch(m -> m.contains("Pack Básico profesionales"));
+            assertThat(logs.messages(Level.ERROR)).noneMatch(m -> m.contains("Pack Básico familias"));
+        }
+    }
+
+    @Test
     void theCuadernosPrices_areNotCheckedWhileTheyAreNotForSale() {
         properties.getCuadernos().setSalesEnabled(false);
         properties.setSalesEnabled(true);

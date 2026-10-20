@@ -1,7 +1,10 @@
 package com.tiam.pack.config;
 
+import com.tiam.pack.domain.PackEdition;
 import com.tiam.subscription.config.MercadoPagoProperties;
 import com.tiam.subscription.config.PlansProperties;
+import java.util.ArrayList;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -49,7 +52,20 @@ public class PackStartupCheck {
         }
         if (cuadernosOn) {
             log.info("Cuadernos sales are ENABLED (CUADERNOS_SALES_ENABLED=true)");
-            checkCuadernosPrices();
+        }
+        // Each enabled product on its own: its prices and the files of its catalog in R2 (one HEAD per object).
+        List<PackEdition> sold = new ArrayList<>();
+        if (packOn) {
+            sold.addAll(PackEdition.packEditions());
+        }
+        if (cuadernosOn) {
+            sold.add(PackEdition.CUADERNOS);
+        }
+        for (PackEdition edition : sold) {
+            readiness.productProblems(edition).forEach(problem -> log.error(
+                    "{} but {} is NOT ready, its checkout is refused as closed (?error=cerrado) until this is fixed: {}",
+                    edition.isCuadernos() ? "CUADERNOS_SALES_ENABLED=true" : "PACK_SALES_ENABLED=true",
+                    edition.productName(), problem));
         }
 
         if (readiness.devModeActive()) {
@@ -74,18 +90,6 @@ public class PackStartupCheck {
         }
     }
 
-    /** A zero or negative price makes every Cuadernos checkout fail with an internal error: say so at boot instead. */
-    private void checkCuadernosPrices() {
-        PackProperties.Cuadernos cuadernos = properties.getCuadernos();
-        if (cuadernos.getPriceArs() == null || cuadernos.getPriceArs().signum() <= 0) {
-            log.error("CUADERNOS_SALES_ENABLED=true but CUADERNOS_PRICE_ARS is \"{}\": it must be greater than zero, "
-                    + "otherwise every Cuadernos checkout fails.", cuadernos.getPriceArs());
-        }
-        if (cuadernos.getGamesPriceArs() == null || cuadernos.getGamesPriceArs().signum() < 0) {
-            log.error("CUADERNOS_SALES_ENABLED=true but CUADERNOS_GAMES_PRICE_ARS is \"{}\": it must be zero or more, "
-                    + "otherwise every Cuadernos checkout with the Desafío fails.", cuadernos.getGamesPriceArs());
-        }
-    }
 
     private void checkUrlsWhileSalesAreOff() {
         if (!readiness.isProduction()) {
