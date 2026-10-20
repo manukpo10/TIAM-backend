@@ -173,50 +173,92 @@ class CuadernosAccessEmailComposerTest {
     // --- the games month ----------------------------------------------------------------------------------------------
 
     @Test
-    void gamesMonth_isListedOnlyWhenBought_withItsActivationMessageAboutTheCuadernos() {
-        PackOrder games = cuadernos();
-        games.setWithGames(true);
-
-        EmailMessage with = composer.compose(games, Optional.of("https://tiamdigital.com/desafio/tok"));
+    void desafioMonth_isListedOnlyWhenGranted_withTheLinkAndTheWhatsAppOption() {
+        EmailMessage with = composer.compose(cuadernosWithMonth(), Optional.of("https://tiamdigital.com/desafio/tok"));
         EmailMessage without = composer.compose(cuadernos(), Optional.empty());
 
-        assertThat(with.html()).contains("Tu primer mes de juegos").contains("Abrir mi mes de juegos")
-                .contains("https://tiamdigital.com/desafio/tok")
-                .contains("compr%C3%A9%20los%20Cuadernos%20TIAM%20con%20el%20mes%20de%20juegos");
-        assertThat(with.text()).contains("MES DE JUEGOS").contains("https://tiamdigital.com/desafio/tok");
-        assertThat(without.html()).doesNotContain("mes de juegos");
-        assertThat(without.text()).doesNotContain("MES DE JUEGOS");
+        assertThat(with.html()).contains("Abrir mi mes del Desafío").contains("https://tiamdigital.com/desafio/tok")
+                .contains("compr%C3%A9%20los%20Cuadernos%20TIAM%20con%20el%20mes%20del%20Desaf%C3%ADo");
+        assertThat(with.text()).contains("TU MES DEL DESAFÍO").contains("https://tiamdigital.com/desafio/tok");
+        assertThat(without.html()).doesNotContain("Desafío");
+        assertThat(without.text()).doesNotContain("Desafío");
     }
 
     @Test
-    void gamesMonth_isTheFirstMonthOnly_startedByWhatsApp_theNextOnesAreOptionalAndPaidApartAtTheNormalPrice() {
-        PackOrder games = cuadernos();
-        games.setWithGames(true);
+    void desafioMonth_saysTheMonthNumberOnceGranted_andNeverCallsItTheFirst() {
+        EmailMessage numbered = composer.compose(cuadernosWithMonth(), Optional.of("https://tiamdigital.com/desafio/tok"), Optional.of(2));
+        EmailMessage unnumbered = composer.compose(cuadernosWithMonth(), Optional.of("https://tiamdigital.com/desafio/tok"));
 
-        EmailMessage unlinked = composer.compose(games, Optional.empty());
-        EmailMessage linked = composer.compose(games, Optional.of("https://tiamdigital.com/desafio/tok"));
+        assertThat(numbered.html()).contains("Mes 2 del Desafío");
+        assertThat(numbered.text()).contains("Mes 2 del Desafío");
+        assertThat(unnumbered.html()).contains("1 mes del Desafío").doesNotContain("Mes 2");
+        assertThat(unnumbered.text()).contains("1 mes del Desafío");
+        for (EmailMessage message : List.of(numbered, unnumbered)) {
+            assertThat(message.html().toLowerCase(java.util.Locale.ROOT)).doesNotContain("primer mes");
+            assertThat(message.text().toLowerCase(java.util.Locale.ROOT)).doesNotContain("primer mes");
+        }
+    }
+
+    @Test
+    void desafioMonth_runsThirtyDaysFromThePurchase_andCanStartRightAway_theNextOnesAreOptionalAndPaidApart() {
+        EmailMessage unlinked = composer.compose(cuadernosWithMonth(), Optional.empty());
+        EmailMessage linked = composer.compose(cuadernosWithMonth(), Optional.of("https://tiamdigital.com/desafio/tok"));
 
         for (EmailMessage message : List.of(unlinked, linked)) {
-            assertThat(message.html()).contains("Tu primer mes de juegos").contains("empieza por WhatsApp")
-                    .contains("Los meses siguientes son opcionales").contains("se pagan aparte, al precio normal")
-                    .contains("No se renueva solo");
-            assertThat(message.text()).contains("Tu primer mes de juegos del Desafío 30 días")
-                    .contains("Los meses siguientes son opcionales").contains("se pagan aparte, al precio normal")
-                    .contains("No se renueva solo");
+            for (String text : List.of(message.html(), message.text())) {
+                assertThat(text).contains("30 días desde la compra")
+                        .contains("Los meses siguientes son opcionales").contains("se pagan aparte, al precio normal")
+                        .contains("No se renueva solo");
+                // the clock does NOT wait for a WhatsApp message, so the email must not say it does
+                assertThat(text).doesNotContain("empieza por WhatsApp").doesNotContain("Para activarlo")
+                        .doesNotContain("te llega el primer ejercicio").doesNotContain("Ya está activo");
+            }
         }
-        assertThat(unlinked.html()).contains("Para activarlo, escribinos por WhatsApp");
-        assertThat(unlinked.text()).contains("escribinos por WhatsApp desde el mismo número que dejaste al comprar");
+        assertThat(linked.html()).contains("Podés empezar ahora mismo desde tu link personal");
+        assertThat(linked.text()).contains("Podés empezar ahora mismo desde tu link personal");
+        assertThat(unlinked.html()).contains("Para empezar, escribinos por WhatsApp desde el mismo número que dejaste al comprar");
+        assertThat(unlinked.text()).contains("Para empezar, escribinos por WhatsApp desde el mismo número que dejaste al comprar");
     }
 
     @Test
-    void gamesMonth_ofThePack_isUnchanged_noFirstMonthNorOptionalMonthsWording() {
+    void whenTheMonthWasNotGranted_theBuyerIsNeverToldItExists() {
+        PackOrder paidButNotGranted = cuadernos();
+        paidButNotGranted.setWithGames(true); // bought, but no month could be granted: no purchase id
+
+        EmailMessage first = composer.compose(paidButNotGranted, Optional.empty());
+        EmailMessage resend = composer.composeResend("ana@example.com",
+                List.of(new PackAccessEmailComposer.ResendEntry(paidButNotGranted, REPLACEMENT, Optional.empty())), "key");
+
+        for (EmailMessage message : List.of(first, resend)) {
+            for (String text : List.of(message.html(), message.text())) {
+                assertThat(text).doesNotContain("Desafío").doesNotContain("mes de juegos")
+                        .doesNotContain("compr%C3%A9%20los%20Cuadernos%20TIAM%20con%20el%20mes");
+            }
+        }
+    }
+
+    @Test
+    void gamesMonth_ofThePack_isUnchanged_noNumberedMonthNorOptionalMonthsWording() {
         PackOrder games = pack();
         games.setWithGames(true);
+        games.setChallengePurchaseId(77L);
 
         EmailMessage message = composer.compose(games, Optional.empty());
 
-        assertThat(message.html()).contains("Tu mes de juegos").doesNotContain("primer mes").doesNotContain("meses siguientes");
+        assertThat(message.html()).contains("Tu mes de juegos").doesNotContain("primer mes").doesNotContain("meses siguientes")
+                .doesNotContain("Mes 1 del Desafío");
         assertThat(message.text()).contains("MES DE JUEGOS").doesNotContain("primer mes").doesNotContain("meses siguientes");
+    }
+
+    @Test
+    void gamesMonth_ofThePack_whenNotGranted_isNotMentioned() {
+        PackOrder games = pack();
+        games.setWithGames(true); // no purchase id
+
+        EmailMessage message = composer.compose(games, Optional.empty());
+
+        assertThat(message.html()).doesNotContain("Tu mes de juegos");
+        assertThat(message.text()).doesNotContain("MES DE JUEGOS");
     }
 
     // --- safety ---------------------------------------------------------------------------------------------------------
@@ -235,8 +277,7 @@ class CuadernosAccessEmailComposerTest {
 
     @Test
     void noEmailEverSaysItWasReviewedBySomeone() {
-        PackOrder games = cuadernos();
-        games.setWithGames(true);
+        PackOrder games = cuadernosWithMonth();
         List<EmailMessage> messages = List.of(
                 composer.compose(cuadernos(), Optional.empty()),
                 composer.compose(games, Optional.of("https://tiamdigital.com/desafio/tok")),
@@ -256,10 +297,10 @@ class CuadernosAccessEmailComposerTest {
 
     @Test
     void sizeBudget_theFullestCuadernosEmailStaysFarBelowGmailsClipLimit() {
-        PackOrder everything = cuadernos();
-        everything.setWithGames(true);
+        PackOrder everything = cuadernosWithMonth();
 
-        EmailMessage message = composer.compose(everything, Optional.of("https://tiamdigital.com/desafio/desafio-token-1"));
+        EmailMessage message = composer.compose(everything, Optional.of("https://tiamdigital.com/desafio/desafio-token-1"),
+                Optional.of(2));
 
         assertThat(message.html().getBytes(java.nio.charset.StandardCharsets.UTF_8).length).isLessThan(40_000);
         assertThat(message.text().length()).isLessThan(6_000);
@@ -311,16 +352,28 @@ class CuadernosAccessEmailComposerTest {
 
     @Test
     void resend_withTheGamesMonth_carriesThePersonalLink() {
-        PackOrder games = cuadernos();
-        games.setWithGames(true);
+        PackOrder games = cuadernosWithMonth();
 
         EmailMessage message = composer.composeResend("ana@example.com", List.of(
-                new PackAccessEmailComposer.ResendEntry(games, REPLACEMENT, Optional.of("https://tiamdigital.com/desafio/tok"))), "key");
+                new PackAccessEmailComposer.ResendEntry(games, REPLACEMENT, Optional.of("https://tiamdigital.com/desafio/tok"),
+                        Optional.of(3))), "key");
 
-        assertThat(message.html()).contains("https://tiamdigital.com/desafio/tok").contains("Tu primer mes de juegos")
+        assertThat(message.html()).contains("https://tiamdigital.com/desafio/tok").contains("Mes 3 del Desafío")
+                .contains("30 días desde la compra")
                 .contains("Los meses siguientes son opcionales").contains("se pagan aparte, al precio normal");
-        assertThat(message.text()).contains("https://tiamdigital.com/desafio/tok")
+        assertThat(message.text()).contains("https://tiamdigital.com/desafio/tok").contains("Mes 3 del Desafío")
                 .contains("Los meses siguientes son opcionales").contains("se pagan aparte, al precio normal");
+        for (String text : List.of(message.html(), message.text())) {
+            assertThat(text.toLowerCase(java.util.Locale.ROOT)).doesNotContain("primer mes").doesNotContain("empieza por whatsapp");
+        }
+    }
+
+    @Test
+    void resend_withoutAKnownMonthNumber_saysOneMonth() {
+        EmailMessage message = composer.composeResend("ana@example.com", List.of(
+                new PackAccessEmailComposer.ResendEntry(cuadernosWithMonth(), REPLACEMENT, Optional.empty())), "key");
+
+        assertThat(message.text()).contains("1 mes del Desafío");
     }
 
     @Test
@@ -351,11 +404,11 @@ class CuadernosAccessEmailComposerTest {
 
     @Test
     void resend_sizeBudget_aMixedEmailStaysWithinIt() {
-        PackOrder games = cuadernos();
-        games.setWithGames(true);
+        PackOrder games = cuadernosWithMonth();
         PackOrder fullPack = pack();
         fullPack.setWithExtra(true);
         fullPack.setWithGames(true);
+        fullPack.setChallengePurchaseId(78L);
 
         EmailMessage message = composer.composeResend("ana@example.com", List.of(
                 new PackAccessEmailComposer.ResendEntry(fullPack, REPLACEMENT, Optional.of("https://tiamdigital.com/desafio/a")),
@@ -365,6 +418,14 @@ class CuadernosAccessEmailComposerTest {
     }
 
     // --- helpers ----------------------------------------------------------------------------------------------------------
+
+    /** A Cuadernos order whose Desafío month was actually granted (the order remembers its purchase). */
+    private static PackOrder cuadernosWithMonth() {
+        PackOrder order = cuadernos();
+        order.setWithGames(true);
+        order.setChallengePurchaseId(77L);
+        return order;
+    }
 
     private static PackOrder cuadernos() {
         PackOrder order = pack();

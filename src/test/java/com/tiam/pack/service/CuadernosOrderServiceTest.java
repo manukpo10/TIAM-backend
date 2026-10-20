@@ -25,6 +25,7 @@ import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
@@ -118,9 +119,10 @@ class CuadernosOrderServiceTest {
     }
 
     @Test
-    void withTheDesafioOffer_whenNoMonthIsLeft_theCuadernosAreStillDelivered_andTheOwnerIsTold() {
+    void withTheDesafioOffer_whenNoMonthIsLeft_theCuadernosAreStillDelivered_andTheOwnerIsToldWhatToRefund() {
         PackOrder order = givenOrder("35000.00");
         order.setWithGames(true);
+        order.setGamesAmount(new BigDecimal("15000.00"));
         order.setPhone(PHONE);
         when(challengePurchases.grantBundledMonth(any(), any(), any())).thenReturn(Optional.empty());
 
@@ -129,7 +131,53 @@ class CuadernosOrderServiceTest {
         assertThat(result).isEqualTo(PackOrderStatus.PAID);
         assertThat(order.getChallengePurchaseId()).isNull();
         verify(events).publishEvent(any(PackOrderPaidEvent.class));
-        verify(ownerNotifier).notify(anyString(), org.mockito.ArgumentMatchers.contains("42"));
+        ArgumentCaptor<String> subject = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
+        verify(ownerNotifier).notify(subject.capture(), body.capture());
+        assertThat(subject.getValue()).contains("42").contains("Cuadernos TIAM");
+        assertThat(body.getValue()).contains("42").contains("Cuadernos TIAM").contains("ana@example.com")
+                .contains("reembols").contains("ARS 15.000")
+                .contains("Los archivos sí se entregaron").doesNotContain("El pack sí se entregó");
+    }
+
+    @Test
+    void withTheDesafioOffer_withoutAPhone_theOwnerIsToldTheProductAndTheAmount() {
+        PackOrder order = givenOrder("35000.00");
+        order.setWithGames(true);
+        order.setGamesAmount(new BigDecimal("15000.00"));
+        order.setPhone(null);
+
+        service.onPayment(42L, approved("PAY-1", "35000.00"));
+
+        ArgumentCaptor<String> subject = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
+        verify(ownerNotifier).notify(subject.capture(), body.capture());
+        assertThat(subject.getValue()).contains("42").contains("Cuadernos TIAM");
+        assertThat(body.getValue()).contains("Cuadernos TIAM").contains("ARS 15.000").contains("reembols");
+    }
+
+    @Test
+    void theAlertNamesTheProductOfThatOrder_andTheRealGamesPriceItPaid() {
+        record Case(PackEdition edition, String product, String gamesAmount, String shown) {
+        }
+        for (Case c : new Case[] {
+                new Case(PackEdition.FAMILIAS, "Pack Básico familias", "10000.00", "ARS 10.000"),
+                new Case(PackEdition.PROFESIONALES, "Pack Básico profesionales", "10000.00", "ARS 10.000"),
+                new Case(PackEdition.CUADERNOS, "Cuadernos TIAM", "12500.50", "ARS 12.500,50")}) {
+            org.mockito.Mockito.reset(ownerNotifier, orders);
+            PackOrder order = givenOrder("35000.00");
+            order.setEdition(c.edition());
+            order.setWithGames(true);
+            order.setGamesAmount(new BigDecimal(c.gamesAmount()));
+            order.setPhone(PHONE);
+            when(challengePurchases.grantBundledMonth(any(), any(), any())).thenReturn(Optional.empty());
+
+            service.onPayment(42L, approved("PAY-" + c.edition(), "35000.00"));
+
+            ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
+            verify(ownerNotifier).notify(anyString(), body.capture());
+            assertThat(body.getValue()).as("%s", c.edition()).contains(c.product()).contains(c.shown());
+        }
     }
 
     @Test

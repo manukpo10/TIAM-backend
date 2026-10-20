@@ -199,6 +199,7 @@ class PackAccessEmailComposerTest {
     void gamesMonth_listsItsActivationStep_withTheLinkWhenThereIsOne() {
         PackOrder games = order();
         games.setWithGames(true);
+        games.setChallengePurchaseId(77L); // the month was actually granted
 
         EmailMessage linked = composer.compose(games, Optional.of("https://tiamdigital.com/desafio/tok"));
         EmailMessage unlinked = composer.compose(games, Optional.empty());
@@ -262,6 +263,7 @@ class PackAccessEmailComposerTest {
                 PackOrder order = order();
                 order.setWithExtra(extra);
                 order.setWithGames(games);
+                order.setChallengePurchaseId(games ? 77L : null);
 
                 EmailMessage message = composer.compose(order, Optional.empty());
 
@@ -281,6 +283,7 @@ class PackAccessEmailComposerTest {
         everything.setEdition(PackEdition.PROFESIONALES);
         everything.setWithExtra(true);
         everything.setWithGames(true);
+        everything.setChallengePurchaseId(77L);
 
         EmailMessage message = composer.compose(everything, Optional.of("https://tiamdigital.com/desafio/desafio-token-1"));
 
@@ -296,6 +299,7 @@ class PackAccessEmailComposerTest {
         professionals.setEdition(PackEdition.PROFESIONALES);
         professionals.setWithExtra(true);
         professionals.setWithGames(true);
+        professionals.setChallengePurchaseId(78L);
 
         EmailMessage message = composer.composeResend("ana@example.com", java.util.List.of(
                 new PackAccessEmailComposer.ResendEntry(familias, "R".repeat(43), Optional.empty()),
@@ -411,6 +415,7 @@ class PackAccessEmailComposerTest {
     void gamesLink_onLocalhost_isUsedOnlyInDevMode() {
         PackOrder games = order();
         games.setWithGames(true);
+        games.setChallengePurchaseId(77L); // the month was actually granted
         Optional<String> local = Optional.of("http://localhost:5180/desafio/tok");
 
         assertThat(composer.compose(games, local).html()).doesNotContain("localhost");
@@ -454,6 +459,7 @@ class PackAccessEmailComposerTest {
     void gamesBlock_carriesTheDesafioLinkAndTheWhatsAppOption() {
         PackOrder games = order();
         games.setWithGames(true);
+        games.setChallengePurchaseId(77L); // the month was actually granted
 
         EmailMessage message = composer.compose(games, Optional.of("https://tiamdigital.com/desafio/desafio-token-1"));
 
@@ -467,6 +473,7 @@ class PackAccessEmailComposerTest {
     void gamesBlock_withoutAUsableDesafioLink_fallsBackToWhatsAppInsteadOfAnUnusableLink() {
         PackOrder games = order();
         games.setWithGames(true);
+        games.setChallengePurchaseId(77L); // the month was actually granted
 
         EmailMessage message = composer.compose(games, Optional.of("http://localhost:5173/desafio/tok"));
 
@@ -479,6 +486,7 @@ class PackAccessEmailComposerTest {
     void gamesBlock_withNoDesafioLinkAtAll_alsoFallsBackToWhatsApp() {
         PackOrder games = order();
         games.setWithGames(true);
+        games.setChallengePurchaseId(77L); // the month was actually granted
 
         EmailMessage message = composer.compose(games, Optional.empty());
 
@@ -542,6 +550,7 @@ class PackAccessEmailComposerTest {
     void resend_carriesTheGamesBlockOnlyForTheOrdersThatBoughtIt() {
         PackOrder games = order();
         games.setWithGames(true);
+        games.setChallengePurchaseId(77L); // the month was actually granted
 
         EmailMessage message = composer.composeResend("ana@example.com", java.util.List.of(
                 new PackAccessEmailComposer.ResendEntry(games, REPLACEMENT, Optional.of("https://tiamdigital.com/desafio/tok"))), "key");

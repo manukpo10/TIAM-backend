@@ -111,6 +111,7 @@ class PackDownloadServiceTest {
     void view_withGamesButNoLinkAvailable_keepsTheBlockWithANullLink() {
         PackOrder order = givenOrder(PackOrderStatus.PAID, 90);
         order.setWithGames(true);
+        order.setChallengePurchaseId(77L); // granted, but no personal link could be produced: WhatsApp is the way in
         when(challengePurchases.findAccessLinkIfActive(any())).thenReturn(Optional.empty());
 
         PackOrderResponse view = service.view(token);

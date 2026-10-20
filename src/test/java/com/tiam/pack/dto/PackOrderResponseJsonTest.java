@@ -39,24 +39,27 @@ class PackOrderResponseJsonTest {
     }
 
     @Test
-    void cuadernosGames_addTheFourFacts_besideTheLink() throws Exception {
+    void cuadernosGames_addTheFacts_besideTheLink_andNeverClaimThatWhatsAppStartsTheClock() throws Exception {
         PackOrderResponse response = PackOrderResponse.paid("Ana", "cuadernos", List.of(),
-                PackOrderResponse.Games.firstMonthOffer("https://tiamdigital.com/desafio/tok", new BigDecimal("20000")),
+                PackOrderResponse.Games.includedMonth("https://tiamdigital.com/desafio/tok", 2, new BigDecimal("20000")),
                 Instant.parse("2027-01-01T00:00:00Z"), new BigDecimal("35000.00"));
 
         JsonNode games = mapper.readTree(mapper.writeValueAsString(response)).get("games");
 
         assertThat(games.get("link").asText()).isEqualTo("https://tiamdigital.com/desafio/tok");
         assertThat(games.get("monthsIncluded").asInt()).isEqualTo(1);
-        assertThat(games.get("startsVia").asText()).isEqualTo("whatsapp");
+        assertThat(games.get("month").asInt()).isEqualTo(2);
+        assertThat(games.get("durationDays").asInt()).isEqualTo(30);
+        assertThat(games.get("startsAt").asText()).isEqualTo("purchase");
         assertThat(games.get("nextMonthsPaidSeparately").asBoolean()).isTrue();
         assertThat(games.get("nextMonthPriceArs").asInt()).isEqualTo(20000);
+        assertThat(games.has("startsVia")).as("the old field promised a WhatsApp start the Desafío does not have").isFalse();
     }
 
     @Test
-    void cuadernosGamesWithoutLink_keepALinkFieldSetToNull() throws Exception {
+    void cuadernosGamesWithoutLinkOrMonth_keepALinkFieldSetToNull_andOmitTheUnknownMonth() throws Exception {
         PackOrderResponse response = PackOrderResponse.paid("Ana", "cuadernos", List.of(),
-                PackOrderResponse.Games.firstMonthOffer(null, new BigDecimal("20000")),
+                PackOrderResponse.Games.includedMonth(null, null, new BigDecimal("20000")),
                 Instant.parse("2027-01-01T00:00:00Z"), new BigDecimal("35000.00"));
 
         JsonNode games = mapper.readTree(mapper.writeValueAsString(response)).get("games");
@@ -64,5 +67,6 @@ class PackOrderResponseJsonTest {
         assertThat(games.has("link")).isTrue();
         assertThat(games.get("link").isNull()).isTrue();
         assertThat(games.get("monthsIncluded").asInt()).isEqualTo(1);
+        assertThat(games.has("month")).isFalse();
     }
 }

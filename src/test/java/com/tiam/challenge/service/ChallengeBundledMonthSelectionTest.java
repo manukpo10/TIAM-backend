@@ -146,6 +146,31 @@ class ChallengeBundledMonthSelectionTest {
         }
     }
 
+    // --- which month an order was actually given (emails and the downloads page say "Mes N del Desafío") -----------------
+
+    @Test
+    void findMonthIfActive_isTheMonthOfTheActivePaidPurchase() {
+        ChallengePurchase purchase = purchases(ChallengePurchaseStatus.PAID, 3).get(0);
+        when(repository.findById(5L)).thenReturn(java.util.Optional.of(purchase));
+
+        assertThat(service.findMonthIfActive(5L)).contains(3);
+    }
+
+    @Test
+    void findMonthIfActive_isEmptyForAnythingThatIsNotAnActivePaidPurchase() {
+        ChallengePurchase pending = purchases(ChallengePurchaseStatus.PENDING, 2).get(0);
+        ChallengePurchase closed = purchases(ChallengePurchaseStatus.PAID, 2).get(0);
+        closed.setActivo(false);
+        when(repository.findById(1L)).thenReturn(java.util.Optional.of(pending));
+        when(repository.findById(2L)).thenReturn(java.util.Optional.of(closed));
+        when(repository.findById(3L)).thenReturn(java.util.Optional.empty());
+
+        assertThat(service.findMonthIfActive(1L)).isEmpty();
+        assertThat(service.findMonthIfActive(2L)).isEmpty();
+        assertThat(service.findMonthIfActive(3L)).isEmpty();
+        assertThat(service.findMonthIfActive(null)).isEmpty();
+    }
+
     private static List<ChallengePurchase> purchases(ChallengePurchaseStatus status, int... months) {
         List<ChallengePurchase> list = new ArrayList<>();
         for (int month : months) {

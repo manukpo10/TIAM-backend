@@ -111,16 +111,19 @@ class CuadernosDownloadServiceTest {
     }
 
     @Test
-    void view_withTheGamesMonth_saysItIsOneMonth_startedByWhatsApp_andTheNextOnesAreOptionalAndPaidApart() {
+    void view_withTheGamesMonth_saysItIsOneMonthOfThirtyDaysFromThePurchase_andTheNextOnesAreOptionalAndPaidApart() {
         PackOrder order = givenOrder(PackEdition.CUADERNOS, PackOrderStatus.PAID);
         order.setWithGames(true);
         order.setChallengePurchaseId(77L);
         when(challengePurchases.findAccessLinkIfActive(77L)).thenReturn(Optional.of("https://tiamdigital.com/desafio/tok"));
+        when(challengePurchases.findMonthIfActive(77L)).thenReturn(Optional.of(2));
 
         PackOrderResponse.Games games = service.view(token).games();
 
         assertThat(games.monthsIncluded()).isEqualTo(1);
-        assertThat(games.startsVia()).isEqualTo("whatsapp");
+        assertThat(games.month()).as("the month actually granted, not always the first").isEqualTo(2);
+        assertThat(games.durationDays()).isEqualTo(30);
+        assertThat(games.startsAt()).as("the clock runs from the payment, not from a WhatsApp message").isEqualTo("purchase");
         assertThat(games.nextMonthsPaidSeparately()).isTrue();
         assertThat(games.nextMonthPriceArs()).isEqualTo(20000); // the Desafío's own price, read from its service
     }
@@ -129,12 +132,28 @@ class CuadernosDownloadServiceTest {
     void view_withTheGamesMonthButNoLink_keepsTheBlockWithANullLink_andTheSameFacts() {
         PackOrder order = givenOrder(PackEdition.CUADERNOS, PackOrderStatus.PAID);
         order.setWithGames(true);
+        order.setChallengePurchaseId(77L); // granted, but no personal link could be produced
         when(challengePurchases.findAccessLinkIfActive(any())).thenReturn(Optional.empty());
 
         PackOrderResponse.Games games = service.view(token).games();
 
         assertThat(games.link()).isNull();
         assertThat(games.monthsIncluded()).isEqualTo(1);
+        assertThat(games.month()).isNull(); // unknown: the page says "1 mes del Desafío"
+    }
+
+    @Test
+    void view_whenTheMonthWasNeverGranted_theBuyerIsNotToldItExists_forEveryEdition() {
+        for (PackEdition edition : PackEdition.values()) {
+            PackOrder order = givenOrder(edition, PackOrderStatus.PAID);
+            order.setWithGames(true); // bought it, but no month could be granted: no purchase id
+
+            PackOrderResponse view = service.view(token);
+
+            assertThat(view.status()).as("%s", edition).isEqualTo("PAID");
+            assertThat(view.games()).as("%s", edition).isNull();
+        }
+        verifyNoInteractions(challengePurchases);
     }
 
     @Test
@@ -148,7 +167,9 @@ class CuadernosDownloadServiceTest {
 
         assertThat(view.games()).isEqualTo(new PackOrderResponse.Games("https://tiamdigital.com/desafio/tok"));
         assertThat(view.games().monthsIncluded()).isNull();
-        assertThat(view.games().startsVia()).isNull();
+        assertThat(view.games().month()).isNull();
+        assertThat(view.games().durationDays()).isNull();
+        assertThat(view.games().startsAt()).isNull();
         assertThat(view.games().nextMonthsPaidSeparately()).isNull();
         assertThat(view.games().nextMonthPriceArs()).isNull();
     }

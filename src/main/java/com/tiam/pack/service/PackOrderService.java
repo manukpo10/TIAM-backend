@@ -9,10 +9,13 @@ import com.tiam.pack.domain.PackOrderPaidEvent;
 import com.tiam.pack.domain.PackOrderStatus;
 import com.tiam.pack.domain.PackTokens;
 import com.tiam.pack.repository.PackOrderRepository;
+import java.math.BigDecimal;
+import java.text.NumberFormat;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
@@ -248,11 +251,15 @@ public class PackOrderService {
      * to the owner to resolve by hand.
      */
     private void grantBundledMonth(PackOrder order) {
+        String product = order.getEdition().productName(); // which product, for the owner's alert
+        String refund = ars(order.getGamesAmount());       // what this order really paid for the Desafío
         if (!StringUtils.hasText(order.getPhone())) {
             log.error("Pack order id={} bought the games add-on without a phone; no Desafío month granted", order.getId());
-            ownerNotifier.notify("Pedido " + order.getId() + ": falta el mes de juegos",
-                    "El pedido " + order.getId() + " incluye el mes de juegos pero no tiene teléfono, así que no se "
-                            + "pudo activar. El pack sí se entregó. Contactá al comprador (" + order.getEmail() + ").");
+            ownerNotifier.notify("Pedido " + order.getId() + " (" + product + "): falta el mes del Desafío",
+                    "El pedido " + order.getId() + " (" + product + ") incluye el mes del Desafío pero no tiene teléfono, "
+                            + "así que no se pudo dar. Los archivos sí se entregaron y el comprador NO recibe ningún aviso "
+                            + "del Desafío. Para resolverlo, reembolsá " + refund + " (lo que pagó por el Desafío) o "
+                            + "contactá al comprador (" + order.getEmail() + ").");
             return;
         }
         // The Desafío service serialises months per phone with a JVM lock that is released BEFORE this transaction
@@ -265,10 +272,21 @@ public class PackOrderService {
             order.setChallengePurchaseId(granted.get().getId());
         } else {
             log.error("Pack order id={}: the phone already has every Desafío month on sale; none granted", order.getId());
-            ownerNotifier.notify("Pedido " + order.getId() + ": no quedaba un mes de juegos para activar",
-                    "El pedido " + order.getId() + " incluye el mes de juegos pero el teléfono ya tenía todos los "
-                            + "meses activos. El pack sí se entregó. Habrá que reembolsar el mes de juegos "
-                            + "o resolverlo con el comprador (" + order.getEmail() + ").");
+            ownerNotifier.notify("Pedido " + order.getId() + " (" + product + "): no quedaba un mes del Desafío para dar",
+                    "El pedido " + order.getId() + " (" + product + ") incluye el mes del Desafío pero el teléfono ya "
+                            + "tenía todos los meses en venta. Los archivos sí se entregaron y el comprador NO recibe "
+                            + "ningún aviso del Desafío. Para resolverlo, reembolsá " + refund + " (lo que pagó por el "
+                            + "Desafío) o resolvelo con el comprador (" + order.getEmail() + ").");
         }
+    }
+
+    /** "ARS 15.000" or "ARS 12.500,50": an amount the way the owner reads it (Argentine separators). */
+    private static String ars(BigDecimal amount) {
+        BigDecimal value = amount == null ? BigDecimal.ZERO : amount;
+        boolean cents = value.stripTrailingZeros().scale() > 0;
+        NumberFormat format = NumberFormat.getNumberInstance(Locale.forLanguageTag("es-AR"));
+        format.setMinimumFractionDigits(cents ? 2 : 0);
+        format.setMaximumFractionDigits(cents ? 2 : 0);
+        return "ARS " + format.format(value);
     }
 }

@@ -117,10 +117,14 @@ public class PackOrderEmailService {
             return false;
         }
 
-        Optional<String> gamesLink = order.isWithGames()
+        // The Desafío month is only talked about when it was actually granted (the order remembers its purchase).
+        Optional<String> gamesLink = order.hasDesafioMonth()
                 ? challengePurchases.findAccessLinkIfActive(order.getChallengePurchaseId())
                 : Optional.empty();
-        EmailMessage message = composer.compose(order, gamesLink);
+        Optional<Integer> gamesMonth = order.hasDesafioMonth()
+                ? challengePurchases.findMonthIfActive(order.getChallengePurchaseId())
+                : Optional.empty();
+        EmailMessage message = composer.compose(order, gamesLink, gamesMonth);
         if (!emailSender.send(message)) {
             log.warn("Pack access email for order id={} was NOT delivered (email_sent_at stays NULL; "
                     + "see the log lines above for the reason)", orderId);

@@ -35,6 +35,15 @@ public enum PackEdition {
         return displayName;
     }
 
+    /** How the owner calls what this order is for, in alerts and logs (never shown to buyers). */
+    public String productName() {
+        return switch (this) {
+            case FAMILIAS -> "Pack Básico familias";
+            case PROFESIONALES -> "Pack Básico profesionales";
+            case CUADERNOS -> "Cuadernos TIAM";
+        };
+    }
+
     /** True for the «Cuadernos TIAM» product, false for the two editions of the basic Pack. */
     public boolean isCuadernos() {
         return this == CUADERNOS;

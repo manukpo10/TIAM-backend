@@ -369,6 +369,20 @@ public class ChallengePurchaseService {
     }
 
     /**
+     * Which Desafío month a PAID, active purchase is (the printable products say "Mes N del Desafío" once the add-on
+     * was granted), or empty.
+     */
+    @Transactional(readOnly = true)
+    public Optional<Integer> findMonthIfActive(Long purchaseId) {
+        if (purchaseId == null) {
+            return Optional.empty();
+        }
+        return challengePurchaseRepository.findById(purchaseId)
+                .filter(p -> p.isActivo() && p.getStatus() == ChallengePurchaseStatus.PAID)
+                .map(ChallengePurchase::getChallengeMonth);
+    }
+
+    /**
      * The lowest month on sale (1 through {@link #MONTHS_ON_SALE}) this phone
      * doesn't already have a PAID purchase for — first-time buyers get 1, a
      * phone that already has month 1 PAID gets 2, and so on. Only PAID rows

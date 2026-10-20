@@ -203,20 +203,24 @@ class CuadernosIntegrationTest {
         assertThat(cuadernosEmailsSentTo("offer@example.com")).as("one access email, not eight").hasSize(1);
         EmailMessage email = cuadernosEmailsSentTo("offer@example.com").get(0);
         assertThat(email.subject()).isEqualTo("Tus Cuadernos TIAM están listos: descargá tus PDF");
-        assertThat(email.html()).contains("Tu primer mes de juegos").contains("https://www.tiamdigital.com/email/cuadernos.jpg");
+        assertThat(email.html()).contains("Mes 1 del Desafío").contains("30 días desde la compra")
+                .contains("https://www.tiamdigital.com/email/cuadernos.jpg").doesNotContain("primer mes");
 
         mvc.perform(get("/packs/orders/" + paid.getAccessToken()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.total").value(35000))
                 .andExpect(jsonPath("$.data.games.link").isNotEmpty())
                 .andExpect(jsonPath("$.data.games.monthsIncluded").value(1))
-                .andExpect(jsonPath("$.data.games.startsVia").value("whatsapp"))
+                .andExpect(jsonPath("$.data.games.month").value(1))
+                .andExpect(jsonPath("$.data.games.durationDays").value(30))
+                .andExpect(jsonPath("$.data.games.startsAt").value("purchase"))
+                .andExpect(jsonPath("$.data.games.startsVia").doesNotExist())
                 .andExpect(jsonPath("$.data.games.nextMonthsPaidSeparately").value(true))
                 .andExpect(jsonPath("$.data.games.nextMonthPriceArs").value(20000));
     }
 
     @Test
-    void aBuyerWhoAlreadyHasMonthOne_getsMonthTwoWithTheCuadernos() {
+    void aBuyerWhoAlreadyHasMonthOne_getsMonthTwoWithTheCuadernos() throws Exception {
         when(emailSender.isEnabled()).thenReturn(true);
         when(emailSender.send(any())).thenReturn(true);
         String phone = nextPhone();
@@ -227,6 +231,11 @@ class CuadernosIntegrationTest {
         packOrderService.onPayment(secondOrder.getId(), approved(secondOrder, "PAY-M2-" + secondOrder.getId()));
 
         assertThat(challengeMonths(phone)).containsExactly(1, 2);
+        // the second order says "Mes 2", never "primer mes"
+        PackOrder second = orders.findById(secondOrder.getId()).orElseThrow();
+        mvc.perform(get("/packs/orders/" + second.getAccessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.games.month").value(2));
     }
 
     @Test
@@ -250,7 +259,7 @@ class CuadernosIntegrationTest {
     }
 
     @Test
-    void whenNoMonthIsLeft_theCuadernosAreStillDelivered() {
+    void whenNoMonthIsLeft_theCuadernosAreStillDelivered_andTheBuyerIsNotToldAMonthExists() throws Exception {
         when(emailSender.isEnabled()).thenReturn(true);
         when(emailSender.send(any())).thenReturn(true);
         String phone = nextPhone();
@@ -273,6 +282,15 @@ class CuadernosIntegrationTest {
         assertThat(paid.getStatus()).isEqualTo(PackOrderStatus.PAID);
         assertThat(paid.getChallengePurchaseId()).isNull();
         assertThat(challengeMonths(phone)).containsExactly(1, 2, 3, 4);
+
+        // the buyer is not told a month exists: not on the downloads page, not in the email
+        mvc.perform(get("/packs/orders/" + paid.getAccessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("PAID"))
+                .andExpect(jsonPath("$.data.games").doesNotExist());
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() ->
+                assertThat(cuadernosEmailsSentTo("nomonth@example.com")).hasSize(1));
+        assertThat(cuadernosEmailsSentTo("nomonth@example.com").get(0).html()).doesNotContain("Desafío");
     }
 
     // ------------------------------------------------------------------------------------------------------------------------

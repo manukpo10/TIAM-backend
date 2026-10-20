@@ -114,6 +114,15 @@ public class PackOrder extends BaseEntity {
         return PackExternalReference.of(getId());
     }
 
+    /**
+     * True when the buyer added the Desafío month AND it was actually granted (the order remembers the purchase it
+     * created). A paid order whose month could not be granted (no month left on sale when the payment arrived) is
+     * {@code withGames} but not this: nothing may tell that buyer the month exists.
+     */
+    public boolean hasDesafioMonth() {
+        return withGames && challengePurchaseId != null;
+    }
+
     /** True while the buyer may download: paid, active and inside the access window. */
     public boolean isDownloadable(Instant now) {
         return status == PackOrderStatus.PAID

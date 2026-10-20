@@ -21,6 +21,13 @@ class CuadernosCatalogTest {
     }
 
     @Test
+    void productNames_areWhatTheOwnerReadsInAnAlert() {
+        assertThat(PackEdition.FAMILIAS.productName()).isEqualTo("Pack Básico familias");
+        assertThat(PackEdition.PROFESIONALES.productName()).isEqualTo("Pack Básico profesionales");
+        assertThat(PackEdition.CUADERNOS.productName()).isEqualTo("Cuadernos TIAM");
+    }
+
+    @Test
     void packEditions_areTheTwoOfTheBasicPack_andNeverTheCuadernos() {
         assertThat(PackEdition.packEditions()).containsExactly(PackEdition.FAMILIAS, PackEdition.PROFESIONALES);
     }

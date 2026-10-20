@@ -147,7 +147,9 @@ class CuadernosCheckoutServiceTest {
         CheckoutPreferenceSpec spec = capturedSpec();
         assertThat(spec.lines()).extracting("id").containsExactly("cuadernos", "juegos");
         assertThat(spec.lines().get(1).unitPrice()).isEqualByComparingTo("15000");
-        assertThat(spec.lines().get(1).description()).contains("primer mes").contains("sin renovación automática");
+        // neutral: the month granted is the buyer's next unpaid one, which is not always the first
+        assertThat(spec.lines().get(1).description()).contains("1 mes del Desafío").contains("sin renovación automática")
+                .doesNotContainIgnoringCase("primer mes");
     }
 
     @Test

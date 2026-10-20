@@ -84,10 +84,14 @@ public class PackDownloadService {
             items.add(item(order, PackProduct.EXTRA, "EXTRA", "Cuadernillo extra"));
         }
         PackOrderResponse.Games games = null;
-        if (order.isWithGames()) {
+        // Only when the month was actually granted: a buyer whose month could not be given (the owner is told to refund
+        // it) must not be shown a block that promises it.
+        if (order.hasDesafioMonth()) {
             String gamesLink = challengePurchases.findAccessLinkIfActive(order.getChallengePurchaseId()).orElse(null);
             games = order.getEdition().isCuadernos()
-                    ? PackOrderResponse.Games.firstMonthOffer(gamesLink, ChallengePurchaseService.monthPriceArs())
+                    ? PackOrderResponse.Games.includedMonth(gamesLink,
+                            challengePurchases.findMonthIfActive(order.getChallengePurchaseId()).orElse(null),
+                            ChallengePurchaseService.monthPriceArs())
                     : new PackOrderResponse.Games(gamesLink);
         }
         return PackOrderResponse.paid(firstName(order.getBuyerName()), order.getEdition().slug(), items, games,

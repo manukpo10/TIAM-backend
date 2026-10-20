@@ -90,10 +90,13 @@ public class PackAccessResender {
         for (PackOrder candidate : paid) {
             packOrderService.issueReplacementToken(candidate.getId()).ifPresent(issued -> {
                 PackOrder order = issued.order();
-                Optional<String> gamesLink = order.isWithGames()
+                Optional<String> gamesLink = order.hasDesafioMonth()
                         ? challengePurchases.findAccessLinkIfActive(order.getChallengePurchaseId())
                         : Optional.empty();
-                entries.add(new PackAccessEmailComposer.ResendEntry(order, issued.token(), gamesLink));
+                Optional<Integer> gamesMonth = order.hasDesafioMonth()
+                        ? challengePurchases.findMonthIfActive(order.getChallengePurchaseId())
+                        : Optional.empty();
+                entries.add(new PackAccessEmailComposer.ResendEntry(order, issued.token(), gamesLink, gamesMonth));
             });
         }
         if (entries.isEmpty()) {
