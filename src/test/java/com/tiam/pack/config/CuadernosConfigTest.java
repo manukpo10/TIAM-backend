@@ -70,10 +70,17 @@ class CuadernosConfigTest {
     }
 
     @Test
+    void replyTo_comesFromEmailReplyTo_withTheOwnerAddressAsTheFallback_andNothingIsRequired() {
+        assertThat(yaml.getProperty("tiam.email.reply-to")).isEqualTo("${EMAIL_REPLY_TO:}");
+        assertThat(yaml.getProperty("tiam.email.reply-to-fallback")).isEqualTo("${PACK_OWNER_NOTIFY_TO:}");
+        assertThat(yaml.getProperty("tiam.pack.owner-notify-to")).isEqualTo("${PACK_OWNER_NOTIFY_TO:}"); // unchanged
+    }
+
+    @Test
     void theBlueprint_declaresTheNewVariables() throws Exception {
         String render = Files.readString(Path.of("render.yaml"));
 
         assertThat(render).contains("CUADERNOS_SALES_ENABLED").contains("CUADERNOS_PRICE_ARS")
-                .contains("CUADERNOS_GAMES_PRICE_ARS").contains("CUADERNOS_CATALOG_VERSION");
+                .contains("CUADERNOS_GAMES_PRICE_ARS").contains("CUADERNOS_CATALOG_VERSION").contains("EMAIL_REPLY_TO");
     }
 }

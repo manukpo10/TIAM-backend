@@ -2,6 +2,7 @@ package com.tiam.common.email;
 
 import java.net.http.HttpClient;
 import java.time.Duration;
+import java.util.Optional;
 import java.util.function.Supplier;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -49,8 +50,10 @@ public class EmailConfig {
         }
 
         if (!apiKey.isEmpty() && !from.isEmpty()) {
-            log.info("Email delivery: Resend enabled (from={})", from);
-            return new ResendEmailSender(restClients.get(), apiKey, from);
+            Optional<String> replyTo = resolveReplyTo(properties);
+            log.info("Email delivery: Resend enabled (from={}, reply-to={})", from,
+                    replyTo.map(EmailAddresses::mask).orElse("none: replies would go to the sender address"));
+            return new ResendEmailSender(restClients.get(), apiKey, from, replyTo.orElse(null));
         }
 
         if (!apiKey.isEmpty()) {
@@ -61,6 +64,28 @@ public class EmailConfig {
                     + "emails (e.g. the Desafío access link after payment) will only be logged, not sent.");
         }
         return new LoggingEmailSender();
+    }
+
+    /**
+     * The Reply-To for every email: {@code EMAIL_REPLY_TO}, else the owner's address ({@code PACK_OWNER_NOTIFY_TO}), else
+     * none. A value that is set but is not a plain email address is logged (never echoed: it could hold anything) and
+     * skipped, so it can neither break the sending nor inject a header.
+     */
+    static Optional<String> resolveReplyTo(EmailProperties properties) {
+        Optional<String> explicit = usableReplyTo("EMAIL_REPLY_TO", properties.getReplyTo());
+        return explicit.isPresent() ? explicit : usableReplyTo("PACK_OWNER_NOTIFY_TO", properties.getReplyToFallback());
+    }
+
+    private static Optional<String> usableReplyTo(String variable, String raw) {
+        if (trimmed(raw).isEmpty()) {
+            return Optional.empty();
+        }
+        Optional<String> plain = EmailAddresses.plainAddress(raw);
+        if (plain.isEmpty()) {
+            log.warn("{} is set but is not a plain email address (one address such as owner@gmail.com, no name, no list): "
+                    + "it is NOT used as the Reply-To.", variable);
+        }
+        return plain;
     }
 
     private static String trimmed(String value) {

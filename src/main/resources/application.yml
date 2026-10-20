@@ -129,6 +129,10 @@ tiam:
     # (see EmailConfig). The sender domain must be verified in Resend.
     resend-api-key: ${RESEND_API_KEY:}
     from: ${EMAIL_FROM:}
+    # Where replies go (Reply-To of every email: the sender address has no inbox). A plain email address. Unset = the
+    # owner's address below, which production already has, so no new variable is needed; both empty = no Reply-To.
+    reply-to: ${EMAIL_REPLY_TO:}
+    reply-to-fallback: ${PACK_OWNER_NOTIFY_TO:}
   pack:
     # Printable pack sales (Mercado Pago + download links). Off until the owner flips it on.
     # Starting a checkout is the only thing gated: paid orders keep downloading when it is off.

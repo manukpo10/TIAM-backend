@@ -74,6 +74,8 @@ services:
         sync: false
       - key: PACK_OWNER_NOTIFY_TO
         sync: false
+      - key: EMAIL_REPLY_TO
+        sync: false
       - key: PACK_STORAGE
         sync: false
       - key: R2_ACCOUNT_ID

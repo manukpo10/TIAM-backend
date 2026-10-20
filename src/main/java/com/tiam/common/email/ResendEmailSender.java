@@ -30,11 +30,22 @@ public class ResendEmailSender implements EmailSender {
     private final RestClient restClient;
     private final String apiKey;
     private final String from;
+    /** Where replies go; null = no Reply-To is sent. Only ever a plain address (see {@link EmailAddresses#plainAddress}). */
+    private final String replyTo;
 
     public ResendEmailSender(RestClient restClient, String apiKey, String from) {
+        this(restClient, apiKey, from, null);
+    }
+
+    /**
+     * @param replyTo where a reply to ANY email sent through here goes (the {@code from} address has no inbox); a blank
+     *                or non-plain value is ignored, so nothing can be injected into the header
+     */
+    public ResendEmailSender(RestClient restClient, String apiKey, String from, String replyTo) {
         this.restClient = restClient;
         this.apiKey = apiKey;
         this.from = from;
+        this.replyTo = EmailAddresses.plainAddress(replyTo).orElse(null);
     }
 
     @Override
@@ -93,6 +104,9 @@ public class ResendEmailSender implements EmailSender {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("from", from);
         body.put("to", List.of(message.to()));
+        if (replyTo != null) {
+            body.put("reply_to", replyTo);
+        }
         body.put("subject", message.subject());
         body.put("html", message.html());
         body.put("text", message.text());
