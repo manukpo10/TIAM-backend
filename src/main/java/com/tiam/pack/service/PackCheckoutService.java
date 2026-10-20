@@ -154,7 +154,9 @@ public class PackCheckoutService {
         order.setBuyerName(name);
         order.setEmail(email);
         order.setPhone(phone);
-        order.setCatalogVersion(properties.getCatalogVersion());
+        // Each product versions its own files: the Cuadernos never follow PACK_CATALOG_VERSION.
+        order.setCatalogVersion(edition.isCuadernos()
+                ? properties.getCuadernos().getCatalogVersion() : properties.getCatalogVersion());
         order.setUtmSource(cleanUtm(command.utmSource()));
         order.setUtmMedium(cleanUtm(command.utmMedium()));
         order.setUtmCampaign(cleanUtm(command.utmCampaign()));

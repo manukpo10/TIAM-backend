@@ -78,6 +78,34 @@ class CuadernosCheckoutServiceTest {
     }
 
     @Test
+    void start_theOrderRemembersTheCuadernosCatalogVersion_notThePacks() throws Exception {
+        properties.setCatalogVersion("v7");              // bumping the Pack's catalog ...
+        properties.getCuadernos().setCatalogVersion("v1"); // ... must never move the Cuadernos' files
+        givenMercadoPagoWorks();
+
+        service.start(command().build());
+
+        assertThat(firstSavedOrder().getCatalogVersion()).isEqualTo("v1");
+    }
+
+    @Test
+    void start_aNewCuadernosCatalogVersion_appliesOnlyToNewCuadernosOrders() throws Exception {
+        properties.getCuadernos().setCatalogVersion("v2");
+        properties.setSalesEnabled(true);
+        givenMercadoPagoWorks();
+
+        service.start(command().email("a@example.com").edition("cuadernos").build());
+        service.start(command().email("b@example.com").edition("familias").build());
+
+        ArgumentCaptor<PackOrder> captor = ArgumentCaptor.forClass(PackOrder.class);
+        verify(orders, org.mockito.Mockito.atLeastOnce()).save(captor.capture());
+        assertThat(captor.getAllValues()).filteredOn(o -> o.getEdition() == PackEdition.CUADERNOS)
+                .allSatisfy(o -> assertThat(o.getCatalogVersion()).isEqualTo("v2"));
+        assertThat(captor.getAllValues()).filteredOn(o -> o.getEdition() == PackEdition.FAMILIAS)
+                .allSatisfy(o -> assertThat(o.getCatalogVersion()).isEqualTo("v1")); // the Pack keeps its own setting
+    }
+
+    @Test
     void start_chargesTheConfiguredCuadernosPrice() throws Exception {
         properties.getCuadernos().setPriceArs(new java.math.BigDecimal("17990"));
         givenMercadoPagoWorks();

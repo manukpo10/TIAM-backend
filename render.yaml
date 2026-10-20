@@ -58,6 +58,8 @@ services:
         sync: false
       - key: CUADERNOS_GAMES_PRICE_ARS
         sync: false
+      - key: CUADERNOS_CATALOG_VERSION
+        sync: false
       - key: PACK_LANDING_BASE_URL
         sync: false
       - key: PACK_THANKYOU_URL

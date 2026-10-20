@@ -56,6 +56,13 @@ class CuadernosConfigTest {
     }
 
     @Test
+    void theCatalogVersion_isItsOwnSetting_v1ByDefault() {
+        assertThat(yaml.getProperty("tiam.pack.cuadernos.catalog-version")).isEqualTo("${CUADERNOS_CATALOG_VERSION:v1}");
+        assertThat(new PackProperties().getCuadernos().getCatalogVersion()).isEqualTo("v1");
+        assertThat(yaml.getProperty("tiam.pack.catalog-version")).isEqualTo("${PACK_CATALOG_VERSION:v1}");
+    }
+
+    @Test
     void thePacksOwnSettings_areUntouched() {
         assertThat(yaml.getProperty("tiam.pack.sales-enabled")).isEqualTo("${PACK_SALES_ENABLED:false}");
         assertThat(yaml.getProperty("tiam.pack.price-ars")).isEqualTo("${PACK_PRICE_ARS:14990}");
@@ -67,6 +74,6 @@ class CuadernosConfigTest {
         String render = Files.readString(Path.of("render.yaml"));
 
         assertThat(render).contains("CUADERNOS_SALES_ENABLED").contains("CUADERNOS_PRICE_ARS")
-                .contains("CUADERNOS_GAMES_PRICE_ARS");
+                .contains("CUADERNOS_GAMES_PRICE_ARS").contains("CUADERNOS_CATALOG_VERSION");
     }
 }

@@ -148,6 +148,8 @@ tiam:
       sales-enabled: ${CUADERNOS_SALES_ENABLED:false}
       price-ars: ${CUADERNOS_PRICE_ARS:20000}
       games-price-ars: ${CUADERNOS_GAMES_PRICE_ARS:15000}
+      # Storage key version of NEW Cuadernos orders (packs/<version>/cuadernos/...); independent of PACK_CATALOG_VERSION.
+      catalog-version: ${CUADERNOS_CATALOG_VERSION:v1}
     landing-base-url: ${PACK_LANDING_BASE_URL:http://localhost:5173}
     thankyou-url: ${PACK_THANKYOU_URL:http://localhost:5173/pack/gracias}
     download-base-url: ${PACK_DOWNLOAD_BASE_URL:http://localhost:5173/pack/descargas}

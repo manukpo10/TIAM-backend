@@ -107,6 +107,12 @@ public class PackProperties {
          * override with CUADERNOS_GAMES_PRICE_ARS). Later months are bought on the Desafío's own page at its normal price.
          */
         private BigDecimal gamesPriceArs = new BigDecimal("15000");
+        /**
+         * Storage key version for NEW Cuadernos orders ({@code packs/v1/cuadernos/...}); each order keeps its own. A
+         * setting of its own so that bumping {@code PACK_CATALOG_VERSION} never points Cuadernos links at files that
+         * were never uploaded under the new version (override with CUADERNOS_CATALOG_VERSION).
+         */
+        private String catalogVersion = "v1";
     }
 
     @Getter
