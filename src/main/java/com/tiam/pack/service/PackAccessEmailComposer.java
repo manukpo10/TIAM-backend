@@ -15,12 +15,19 @@ import com.tiam.pack.domain.PackCatalog;
 import com.tiam.pack.domain.PackEdition;
 import com.tiam.pack.domain.PackFile;
 import com.tiam.pack.domain.PackOrder;
+import java.math.BigDecimal;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.text.DecimalFormat;
+import java.text.DecimalFormatSymbols;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -52,6 +59,17 @@ public class PackAccessEmailComposer {
     static final String SUBJECT_RESEND_CUADERNOS = "Tu acceso a los Cuadernos TIAM";
     /** A "lost my link" email that covers a Pack order AND a Cuadernos order. */
     static final String SUBJECT_RESEND_MIXED = "Tu acceso a tus compras de TIAM";
+
+    /**
+     * Said near the top of every delivery email: a mailbox that filed it in Spam (Yahoo does) also disables its links
+     * until the buyer marks it as "not spam". The plain-text part says "enlace" because it has no button.
+     */
+    static final String SPAM_NOTE = "Si este mail llegó a Spam, marcalo como \"No es spam\" para que el botón de descarga funcione.";
+    static final String SPAM_NOTE_TEXT = "Si este mail llegó a Spam, marcalo como \"No es spam\" para que el enlace de descarga funcione.";
+    static final String SUMMARY_TITLE = "Resumen de tu compra";
+
+    private static final DateTimeFormatter PAID_ON =
+            DateTimeFormatter.ofPattern("dd/MM/yyyy").withZone(ZoneId.of("America/Argentina/Buenos_Aires"));
 
     static final String CTA_LABEL = "Descargar mis archivos";
     static final String DEFAULT_ASSETS_BASE_URL = "https://www.tiamdigital.com/email";
@@ -190,6 +208,7 @@ public class PackAccessEmailComposer {
                         : "Tus fichas ya están listas para descargar e imprimir.");
 
         StringBuilder rows = new StringBuilder();
+        rows.append(PackEmailHtml.notice(SPAM_NOTE));
         rows.append(PackEmailHtml.hero(
                 cuadernos ? "CUADERNOS TIAM" : "PACK TIAM · EDICIÓN " + edition.displayName().toUpperCase(Locale.ROOT),
                 cuadernos ? "¡Tus Cuadernos TIAM están listos!" : "¡Tu Pack TIAM está listo!", intro, cta));
@@ -197,6 +216,7 @@ public class PackAccessEmailComposer {
 
         StringBuilder content = new StringBuilder();
         content.append(filesPanel(order, desafio));
+        content.append(summaryPanel(order));
         content.append(cuadernos ? cuadernosTips() : printingTips(edition));
         content.append(PackEmailHtml.ruleThen(
                 PackEmailHtml.paragraph("<strong>Tu acceso a las descargas dura " + days + " días</strong> desde hoy. "
@@ -354,6 +374,68 @@ public class PackAccessEmailComposer {
                 : "Pack Básico de TIAM, edición para familias: 120 fichas para imprimir, con una guía para acompañar";
     }
 
+    // ---- "Resumen de tu compra" ----------------------------------------------------------------------------
+
+    /**
+     * The receipt facts, straight from the order, as plain text (label, value). The order number is the order id, the
+     * number the buyer quotes in the regret form; a fact the order does not have (amount, payment date) is left out
+     * rather than guessed. Both the HTML panel and the plain-text block are built from this list, so they agree.
+     */
+    private static List<Map.Entry<String, String>> summaryFacts(PackOrder order) {
+        List<Map.Entry<String, String>> facts = new ArrayList<>();
+        if (order.getId() != null) {
+            facts.add(Map.entry("Pedido", "N° " + order.getId()));
+        }
+        facts.add(Map.entry("Producto", productLabel(order)));
+        if (order.getTotalAmount() != null) {
+            facts.add(Map.entry("Importe pagado", money(order.getCurrency(), order.getTotalAmount())));
+        }
+        if (order.getPaidAt() != null) {
+            facts.add(Map.entry("Fecha de pago", PAID_ON.format(order.getPaidAt())));
+        }
+        return facts;
+    }
+
+    /** What the buyer bought, as the emails call it; the Desafío month only when it was actually granted. */
+    private static String productLabel(PackOrder order) {
+        PackEdition edition = order.getEdition();
+        StringBuilder label = new StringBuilder(edition.isCuadernos()
+                ? "Cuadernos TIAM" : "Pack TIAM · Edición " + edition.displayName());
+        if (!edition.isCuadernos() && order.isWithExtra()) {
+            label.append(" + Cuadernillo extra");
+        }
+        if (order.hasDesafioMonth()) {
+            label.append(edition.isCuadernos() ? " + mes del Desafío" : " + mes de juegos");
+        }
+        return label.toString();
+    }
+
+    /** "ARS 20.000" or "ARS 12.500,50": Argentine separators, cents only when there are some. */
+    private static String money(String currency, BigDecimal amount) {
+        DecimalFormatSymbols symbols = new DecimalFormatSymbols(Locale.forLanguageTag("es-AR"));
+        symbols.setGroupingSeparator('.');
+        symbols.setDecimalSeparator(',');
+        boolean cents = amount.stripTrailingZeros().scale() > 0;
+        String code = StringUtils.hasText(currency) ? currency.strip().toUpperCase(Locale.ROOT) : "ARS";
+        return code + " " + new DecimalFormat(cents ? "#,##0.00" : "#,##0", symbols).format(amount);
+    }
+
+    private static String summaryPanel(PackOrder order) {
+        List<Map.Entry<String, String>> facts = new ArrayList<>();
+        for (Map.Entry<String, String> fact : summaryFacts(order)) {
+            facts.add(Map.entry(esc(fact.getKey()), esc(fact.getValue())));
+        }
+        return PackEmailHtml.summaryPanel(SUMMARY_TITLE, facts);
+    }
+
+    private static void appendSummaryText(StringBuilder text, PackOrder order) {
+        text.append(SUMMARY_TITLE.toUpperCase(Locale.ROOT)).append("\n");
+        for (Map.Entry<String, String> fact : summaryFacts(order)) {
+            text.append("- ").append(fact.getKey()).append(": ").append(fact.getValue()).append("\n");
+        }
+        text.append("\n");
+    }
+
     // ---- the first email, plain text -----------------------------------------------------------------
 
     private String renderText(PackOrder order, String link, Context ctx, Desafio desafio) {
@@ -362,7 +444,7 @@ public class PackAccessEmailComposer {
         }
         PackEdition edition = order.getEdition();
         StringBuilder text = new StringBuilder();
-        text.append(ctx.greeting()).append("\n\n");
+        text.append(ctx.greeting()).append("\n\n").append(SPAM_NOTE_TEXT).append("\n\n");
         text.append("¡Gracias por tu compra! Tu Pack TIAM (Edición ").append(edition.displayName())
                 .append(") ya está listo para descargar.\n");
         text.append("\nDESCARGAR MIS ARCHIVOS\n").append(link).append("\n\n");
@@ -381,6 +463,7 @@ public class PackAccessEmailComposer {
             appendGamesText(text, desafio.url(), activationUrl(order));
         }
 
+        appendSummaryText(text, order);
         text.append("PARA IMPRIMIR\n");
         text.append("1. Empezá acá: abrí «Empezá acá», las primeras páginas del Pack completo.\n");
         text.append("2. A una sola cara: la guía trae ")
@@ -441,7 +524,7 @@ public class PackAccessEmailComposer {
     /** The first email of a Cuadernos order, as plain text: the same facts as the HTML, from the same catalog. */
     private String renderCuadernosText(PackOrder order, String link, Context ctx, Desafio desafio) {
         StringBuilder text = new StringBuilder();
-        text.append(ctx.greeting()).append("\n\n");
+        text.append(ctx.greeting()).append("\n\n").append(SPAM_NOTE_TEXT).append("\n\n");
         text.append("¡Gracias por tu compra! Tus Cuadernos TIAM ya están listos para descargar.\n");
         text.append("\nDESCARGAR MIS ARCHIVOS\n").append(link).append("\n\n");
 
@@ -458,6 +541,7 @@ public class PackAccessEmailComposer {
             appendCuadernosDesafioText(text, desafio, activationUrl(order));
         }
 
+        appendSummaryText(text, order);
         text.append("PARA IMPRIMIR\n");
         text.append("1. Empezá por tu nivel: los cuadernos van del nivel inicial al avanzado; elegí con cuál empezar.\n");
         text.append("2. Imprimí de a uno: los PDF sueltos pesan menos y te dejan imprimir un cuaderno por vez.\n");
@@ -513,6 +597,7 @@ public class PackAccessEmailComposer {
             case MIXED -> "Tu acceso a tus compras de TIAM";
         };
         StringBuilder rows = new StringBuilder();
+        rows.append(PackEmailHtml.notice(SPAM_NOTE));
         rows.append(PackEmailHtml.hero(switch (subject) {
             case PACK -> "PACK TIAM";
             case CUADERNOS -> "CUADERNOS TIAM";
@@ -535,6 +620,7 @@ public class PackAccessEmailComposer {
                     + "¿No abre el botón? Copiá este link en tu navegador:<br>"
                     + PackEmailHtml.breakingLink(esc(link), esc(link)) + "</p>");
             content.append(filesPanel(order, desafioOf(order, entry.gamesLink(), entry.gamesMonth())));
+            content.append(summaryPanel(order));
         }
         content.append(PackEmailHtml.sectionTitle("Importante"));
         content.append(PackEmailHtml.tip(1, "Tu link anterior sigue funcionando",
@@ -557,7 +643,7 @@ public class PackAccessEmailComposer {
 
     private String renderResendText(List<ResendEntry> entries, Context ctx) {
         StringBuilder text = new StringBuilder();
-        text.append(ctx.greeting()).append("\n\n");
+        text.append(ctx.greeting()).append("\n\n").append(SPAM_NOTE_TEXT).append("\n\n");
         text.append("Pediste el acceso a ").append(ctx.subject().accessNoun()).append(" de nuevo. Acá tenés ")
                 .append(entries.size() == 1 ? "tu link" : "tus links").append(":\n\n");
         for (ResendEntry entry : entries) {
@@ -587,6 +673,7 @@ public class PackAccessEmailComposer {
                 }
             }
             text.append("\n");
+            appendSummaryText(text, order);
         }
         text.append("IMPORTANTE\n");
         text.append("- Tu link anterior sigue funcionando hasta que abras uno de estos; en ese momento deja de funcionar.\n");
@@ -620,6 +707,7 @@ public class PackAccessEmailComposer {
             text.append(CUADERNOS_DESAFIO_TERMS).append("\n");
         }
         text.append("\n");
+        appendSummaryText(text, order);
     }
 
     // ---- links and assets ------------------------------------------------------------------------------

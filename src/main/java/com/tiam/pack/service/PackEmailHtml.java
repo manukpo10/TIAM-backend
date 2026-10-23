@@ -1,5 +1,6 @@
 package com.tiam.pack.service;
 
+import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -96,6 +97,17 @@ final class PackEmailHtml {
                 + "</td></tr>\n";
     }
 
+    /**
+     * A thin light bar above the headline for one short sentence the reader should see first (it re-colours in dark
+     * mode like the panels). {@code textHtml} must already be escaped.
+     */
+    static String notice(String textHtml) {
+        return "<tr><td class=\"pad bg-soft bd-soft\" bgcolor=\"" + SOFT_BG + "\" style=\"background-color:" + SOFT_BG
+                + ";border-bottom:1px solid " + SOFT_BORDER + ";padding:12px 36px;font-family:" + FONT + ";\">"
+                + "<p class=\"tx\" style=\"margin:0;font-size:14px;line-height:21px;color:" + NAVY + ";\">" + textHtml
+                + "</p></td></tr>\n";
+    }
+
     /** Full-width product picture. The width attribute is for Outlook; the style makes it fluid everywhere else. */
     static String productImage(String src, String alt) {
         return "<tr><td bgcolor=\"" + PICTURE_BG + "\" style=\"background-color:" + PICTURE_BG + ";font-size:0;line-height:0;\">"
@@ -190,6 +202,25 @@ final class PackEmailHtml {
                 + "<td class=\"tx-h\" align=\"right\" valign=\"top\" style=\"padding:1px 0 0 12px;white-space:nowrap;font-size:15px;"
                 + "line-height:24px;font-weight:700;color:" + NAVY + ";\">" + size + "</td>"
                 + "</tr></table></td></tr>";
+    }
+
+    /**
+     * A compact receipt: the light panel with one "label ... value" line per fact. Labels and values must already be
+     * escaped; the caller leaves out any fact it does not have.
+     */
+    static String summaryPanel(String title, List<Map.Entry<String, String>> facts) {
+        StringBuilder rows = new StringBuilder();
+        for (Map.Entry<String, String> fact : facts) {
+            rows.append("<tr><td style=\"padding:3px 22px;\">"
+                    + "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\"><tr>"
+                    + "<td class=\"tx-muted\" valign=\"top\" style=\"white-space:nowrap;font-size:14px;line-height:21px;color:"
+                    + MUTED + ";\">" + fact.getKey() + "</td>"
+                    + "<td class=\"tx-h\" align=\"right\" valign=\"top\" style=\"padding-left:14px;font-size:14px;line-height:21px;"
+                    + "font-weight:700;color:" + NAVY + ";\">" + fact.getValue() + "</td>"
+                    + "</tr></table></td></tr>");
+        }
+        rows.append("<tr><td style=\"height:16px;font-size:0;line-height:0;\">&nbsp;</td></tr>");
+        return panel(title, "", rows.toString());
     }
 
     static String panelNote(String html) {
