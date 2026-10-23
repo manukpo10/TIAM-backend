@@ -233,9 +233,11 @@ public final class ChallengeDayCatalog {
             Map.entry(25, new DayInfo(ChallengeDayType.GAME, "praxias")),
             Map.entry(26, new DayInfo(ChallengeDayType.GAME, "ejecutivas")),
             Map.entry(27, new DayInfo(ChallengeDayType.GAME, "lenguaje")),
-            Map.entry(28, new DayInfo(ChallengeDayType.GAME, "calculo")),
+            // Días 28 ("Una palabra por letra") and 30 ("Palabra y significado") replaced two cálculo games with
+            // language games at the tallerista's request; the frontend already shows them as lenguaje.
+            Map.entry(28, new DayInfo(ChallengeDayType.GAME, "lenguaje")),
             Map.entry(29, new DayInfo(ChallengeDayType.GAME, "atencion")),
-            Map.entry(30, new DayInfo(ChallengeDayType.GAME, "calculo")));
+            Map.entry(30, new DayInfo(ChallengeDayType.GAME, "lenguaje")));
 
     public static final int TOTAL_DAYS = DAYS_MONTH_1.size();
 

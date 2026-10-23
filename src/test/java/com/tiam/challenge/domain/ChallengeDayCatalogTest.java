@@ -142,7 +142,7 @@ class ChallengeDayCatalogTest {
                 Map.entry(19, "lenguaje"), Map.entry(20, "calculo"), Map.entry(21, "atencion"),
                 Map.entry(22, "ejecutivas"), Map.entry(23, "lenguaje"), Map.entry(24, "calculo"),
                 Map.entry(25, "praxias"), Map.entry(26, "ejecutivas"), Map.entry(27, "lenguaje"),
-                Map.entry(28, "calculo"), Map.entry(29, "atencion"), Map.entry(30, "calculo"));
+                Map.entry(28, "lenguaje"), Map.entry(29, "atencion"), Map.entry(30, "lenguaje"));
 
         // Map.ofEntries rejects a duplicate key but happily accepts a MISSING one —
         // without this, a day dropped from the table above would silently skip its
